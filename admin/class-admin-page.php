@@ -16,10 +16,20 @@ final class Admin_Page
     public const MENU_SLUG = 'clicklink';
     private const SAVE_ACTION = 'clicklink_save_mapping';
     private const DELETE_ACTION = 'clicklink_delete_mapping';
+    private const BULK_DELETE_ACTION = 'clicklink_bulk_delete_mappings';
     private const START_SCAN_ACTION = 'clicklink_backfill_start';
     private const NEXT_BATCH_ACTION = 'clicklink_backfill_next_batch';
     private const RESET_SCAN_ACTION = 'clicklink_backfill_reset';
     private const NOTICE_QUERY_KEY = 'clicklink_notice';
+    private const BULK_DELETED_COUNT_QUERY_KEY = 'clicklink_deleted_count';
+    private const MAPPINGS_SEARCH_QUERY_KEY = 'clicklink_mappings_search';
+    private const MAPPINGS_KEYWORD_FILTER_QUERY_KEY = 'clicklink_mappings_keyword';
+    private const MAPPINGS_SORT_QUERY_KEY = 'clicklink_mappings_sort';
+    private const MAPPINGS_ORDER_QUERY_KEY = 'clicklink_mappings_order';
+    private const MAPPINGS_PAGE_QUERY_KEY = 'clicklink_mappings_page';
+    private const MAPPINGS_PER_PAGE_QUERY_KEY = 'clicklink_mappings_per_page';
+    private const DEFAULT_MAPPINGS_PER_PAGE = 20;
+    private const MAX_MAPPINGS_PER_PAGE = 200;
     private Keyword_Mapping_Repository $mapping_repository;
     private ?Backfill_Scanner $backfill_scanner;
 
@@ -43,6 +53,7 @@ final class Admin_Page
             array(
                 self::SAVE_ACTION => 'handle_save_mapping',
                 self::DELETE_ACTION => 'handle_delete_mapping',
+                self::BULK_DELETE_ACTION => 'handle_bulk_delete_mappings',
                 self::START_SCAN_ACTION => 'handle_start_scan',
                 self::NEXT_BATCH_ACTION => 'handle_next_batch',
                 self::RESET_SCAN_ACTION => 'handle_reset_scan',
@@ -110,11 +121,23 @@ final class Admin_Page
         }
 
         $mapping_id = Runtime::positive_int(self::request_post('mapping_id'));
-        $keyword = Keyword_Mapping_Repository::normalize_keyword_for_storage(self::request_post('keyword'));
-        $url = Keyword_Mapping_Repository::sanitize_url(self::request_post('url'));
+        $raw_keyword = self::request_post('keyword');
+        $raw_url = self::request_post('url');
+        $keyword = Keyword_Mapping_Repository::normalize_keyword_for_storage($raw_keyword);
+        $url = Keyword_Mapping_Repository::sanitize_url($raw_url);
 
-        if ($keyword === '' || $url === '') {
-            $this->redirect_with_notice('invalid_input');
+        if ($keyword === '') {
+            $this->redirect_with_notice('keyword_required');
+            return;
+        }
+
+        if (trim($raw_url) === '') {
+            $this->redirect_with_notice('url_required');
+            return;
+        }
+
+        if ($url === '') {
+            $this->redirect_with_notice('invalid_url');
             return;
         }
 
@@ -171,6 +194,55 @@ final class Admin_Page
         }
 
         $this->redirect_with_notice('db_error');
+    }
+
+    public function handle_bulk_delete_mappings(): void
+    {
+        if (! self::can_manage()) {
+            $this->deny_access();
+            return;
+        }
+
+        if (! $this->verify_nonce(self::BULK_DELETE_ACTION)) {
+            $this->redirect_with_notice('invalid_nonce', $this->mapping_table_query_args_from_post());
+            return;
+        }
+
+        if (self::request_post('bulk_action') !== 'delete') {
+            $this->redirect_with_notice('bulk_action_required', $this->mapping_table_query_args_from_post());
+            return;
+        }
+
+        $mapping_ids = self::request_post_id_list('mapping_ids');
+
+        if ($mapping_ids === array()) {
+            $this->redirect_with_notice('bulk_selection_required', $this->mapping_table_query_args_from_post());
+            return;
+        }
+
+        $deleted_count = 0;
+
+        foreach ($mapping_ids as $mapping_id) {
+            if (! $this->mapping_exists($mapping_id)) {
+                continue;
+            }
+
+            if (! $this->delete_mapping($mapping_id)) {
+                $this->redirect_with_notice('db_error', $this->mapping_table_query_args_from_post());
+                return;
+            }
+
+            $deleted_count++;
+        }
+
+        if ($deleted_count <= 0) {
+            $this->redirect_with_notice('not_found', $this->mapping_table_query_args_from_post());
+            return;
+        }
+
+        $redirect_args = $this->mapping_table_query_args_from_post();
+        $redirect_args[self::BULK_DELETED_COUNT_QUERY_KEY] = (string) $deleted_count;
+        $this->redirect_with_notice('bulk_deleted', $redirect_args);
     }
 
     public function handle_start_scan(): void
@@ -481,20 +553,45 @@ final class Admin_Page
 
     private function render_mappings_table(): void
     {
-        $mappings = $this->fetch_mappings();
+        $query_args = $this->mapping_table_query_args_from_get();
+        $paged_data = $this->fetch_mappings_page($query_args);
+        $mappings = $paged_data['rows'];
+        $total_rows = Runtime::non_negative_int($paged_data['total'] ?? 0);
+        $current_page = max(1, Runtime::positive_int((string) ($paged_data['page'] ?? '1')));
+        $per_page = max(1, Runtime::positive_int((string) ($paged_data['per_page'] ?? (string) self::DEFAULT_MAPPINGS_PER_PAGE)));
+        $total_pages = max(1, Runtime::non_negative_int($paged_data['total_pages'] ?? 1));
+        $filters_active = ($query_args['search'] !== '') || ($query_args['keyword_filter'] !== '');
 
         echo '<hr />';
         echo '<h2>' . self::escape(self::translate('Keyword Mappings')) . '</h2>';
+        echo '<p>' . self::escape(self::translate('Search, filter, sort, and bulk-manage mappings while preserving duplicate keyword rows.')) . '</p>';
+        $this->render_mappings_filter_form($query_args);
+
+        if ($mappings === array() && $total_rows <= 0 && ! $filters_active) {
+            echo '<p>' . self::escape(self::translate('No mappings yet. Add your first keyword and URL above.')) . '</p>';
+            return;
+        }
+
+        echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
+        echo '<input type="hidden" name="action" value="' . self::escape_attr(self::BULK_DELETE_ACTION) . '">';
+        echo self::nonce_field(self::BULK_DELETE_ACTION);
+        $this->render_mapping_query_hidden_inputs($query_args);
+        $this->render_bulk_actions_controls();
 
         if ($mappings === array()) {
-            echo '<p>' . self::escape(self::translate('No mappings yet. Add your first keyword and URL above.')) . '</p>';
+            echo '<p>' . self::escape(self::translate('No mappings matched your current search/filter settings.')) . '</p>';
+            echo '</form>';
             return;
         }
 
         echo '<table class="widefat striped">';
         echo '<thead><tr>';
-        echo '<th>' . self::escape(self::translate('Keyword')) . '</th>';
-        echo '<th>' . self::escape(self::translate('URL')) . '</th>';
+        echo '<th style="width: 32px;"><input type="checkbox" id="clicklink-select-all-mappings" aria-label="';
+        echo self::escape_attr(self::translate('Select all mappings on this page'));
+        echo '" onclick="var boxes=document.querySelectorAll(\'.clicklink-mapping-select\');for(var i=0;i<boxes.length;i++){boxes[i].checked=this.checked;}"></th>';
+        echo '<th>' . $this->render_sort_link($query_args, self::translate('Keyword'), 'keyword') . '</th>';
+        echo '<th>' . $this->render_sort_link($query_args, self::translate('URL'), 'url') . '</th>';
+        echo '<th>' . $this->render_sort_link($query_args, self::translate('Updated'), 'updated_at') . '</th>';
         echo '<th>' . self::escape(self::translate('Actions')) . '</th>';
         echo '</tr></thead>';
         echo '<tbody>';
@@ -504,30 +601,31 @@ final class Admin_Page
             $keyword = (string) ($mapping['keyword'] ?? '');
             $url = (string) ($mapping['url'] ?? '');
             $edit_url = self::add_query_args(
-                array(
-                    'action' => 'edit',
-                    'mapping_id' => (string) $id,
+                array_merge(
+                    $this->mapping_table_query_args_to_request_values($query_args),
+                    array(
+                        'action' => 'edit',
+                        'mapping_id' => (string) $id,
+                    )
                 ),
                 $this->admin_page_url()
             );
 
             echo '<tr>';
+            echo '<td><input class="clicklink-mapping-select" type="checkbox" name="mapping_ids[]" value="' . self::escape_attr((string) $id) . '"></td>';
             echo '<td><code>' . self::escape($keyword) . '</code></td>';
             echo '<td><a href="' . self::escape_url($url) . '" target="_blank" rel="noopener noreferrer">' . self::escape($url) . '</a></td>';
+            echo '<td>' . self::escape($this->display_timestamp((string) ($mapping['updated_at'] ?? ''))) . '</td>';
             echo '<td>';
-            echo '<a class="button button-small" href="' . self::escape_url($edit_url) . '">' . self::escape(self::translate('Edit')) . '</a> ';
-            echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '" style="display:inline-block; margin:0;">';
-            echo '<input type="hidden" name="action" value="' . self::escape_attr(self::DELETE_ACTION) . '">';
-            echo '<input type="hidden" name="mapping_id" value="' . self::escape_attr((string) $id) . '">';
-            echo self::nonce_field(self::DELETE_ACTION);
-            echo '<button type="submit" class="button button-small button-link-delete">' . self::escape(self::translate('Delete')) . '</button>';
-            echo '</form>';
+            echo '<a class="button button-small" href="' . self::escape_url($edit_url) . '">' . self::escape(self::translate('Edit')) . '</a>';
             echo '</td>';
             echo '</tr>';
         }
 
         echo '</tbody>';
         echo '</table>';
+        echo '</form>';
+        $this->render_mappings_pagination($query_args, $current_page, $per_page, $total_pages, $total_rows, count($mappings));
     }
 
     private function render_notice(): void
@@ -553,6 +651,12 @@ final class Admin_Page
             'scan_start_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to start manual backfill run. Please try again.')),
             'scan_next_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to process the next batch. Please review scanner status and retry.')),
             'scan_reset_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to reset manual backfill state. Please try again.')),
+            'bulk_deleted' => array('class' => 'notice-success', 'message' => $this->bulk_deleted_notice_message()),
+            'bulk_action_required' => array('class' => 'notice-error', 'message' => self::translate('Choose a bulk action before applying changes.')),
+            'bulk_selection_required' => array('class' => 'notice-error', 'message' => self::translate('Select at least one mapping row to delete.')),
+            'keyword_required' => array('class' => 'notice-error', 'message' => self::translate('Keyword is required.')),
+            'url_required' => array('class' => 'notice-error', 'message' => self::translate('URL is required.')),
+            'invalid_url' => array('class' => 'notice-error', 'message' => self::translate('Please enter a valid URL, including protocol (for example, https://example.com).')),
             'invalid_input' => array('class' => 'notice-error', 'message' => self::translate('Keyword and a valid URL are required.')),
             'invalid_nonce' => array('class' => 'notice-error', 'message' => self::translate('Security check failed. Please try again.')),
             'not_found' => array('class' => 'notice-error', 'message' => self::translate('The selected mapping no longer exists.')),
@@ -571,11 +675,362 @@ final class Admin_Page
     }
 
     /**
-     * @return array<int, array{id: int, keyword: string, url: string, created_at: string, updated_at: string}>
+     * @param array{
+     *   search: string,
+     *   keyword_filter: string,
+     *   sort_by: string,
+     *   sort_direction: string,
+     *   page: int,
+     *   per_page: int
+     * } $query_args
+     * @return array{
+     *   rows: array<int, array{id: int, keyword: string, url: string, created_at: string, updated_at: string}>,
+     *   total: int,
+     *   page: int,
+     *   per_page: int,
+     *   total_pages: int
+     * }
      */
-    private function fetch_mappings(): array
+    private function fetch_mappings_page(array $query_args): array
     {
-        return $this->mapping_repository->fetch_mappings();
+        return $this->mapping_repository->fetch_mappings_page($query_args);
+    }
+
+    private function render_mappings_filter_form(array $query_args): void
+    {
+        $search = (string) ($query_args['search'] ?? '');
+        $keyword_filter = (string) ($query_args['keyword_filter'] ?? '');
+        $sort_by = (string) ($query_args['sort_by'] ?? 'keyword');
+        $sort_direction = (string) ($query_args['sort_direction'] ?? 'asc');
+        $per_page = Runtime::positive_int((string) ($query_args['per_page'] ?? self::DEFAULT_MAPPINGS_PER_PAGE));
+        $per_page_options = array(20, 50, 100, 200);
+
+        if (! in_array($per_page, $per_page_options, true)) {
+            $per_page_options[] = max(1, min(self::MAX_MAPPINGS_PER_PAGE, $per_page));
+        }
+
+        sort($per_page_options, SORT_NUMERIC);
+
+        echo '<form method="get" action="' . self::escape_url($this->admin_page_url()) . '">';
+        echo '<input type="hidden" name="' . self::escape_attr(self::MAPPINGS_SORT_QUERY_KEY) . '" value="' . self::escape_attr($sort_by) . '">';
+        echo '<input type="hidden" name="' . self::escape_attr(self::MAPPINGS_ORDER_QUERY_KEY) . '" value="' . self::escape_attr($sort_direction) . '">';
+        echo '<input type="hidden" name="' . self::escape_attr(self::MAPPINGS_PAGE_QUERY_KEY) . '" value="1">';
+        echo '<p>';
+        echo '<label for="clicklink-mappings-search">' . self::escape(self::translate('Search')) . '</label> ';
+        echo '<input id="clicklink-mappings-search" name="' . self::escape_attr(self::MAPPINGS_SEARCH_QUERY_KEY) . '" type="search" class="regular-text" value="' . self::escape_attr($search) . '"> ';
+        echo '<label for="clicklink-mappings-keyword">' . self::escape(self::translate('Keyword filter')) . '</label> ';
+        echo '<input id="clicklink-mappings-keyword" name="' . self::escape_attr(self::MAPPINGS_KEYWORD_FILTER_QUERY_KEY) . '" type="text" class="regular-text" value="' . self::escape_attr($keyword_filter) . '"> ';
+        echo '<label for="clicklink-mappings-per-page">' . self::escape(self::translate('Rows per page')) . '</label> ';
+        echo '<select id="clicklink-mappings-per-page" name="' . self::escape_attr(self::MAPPINGS_PER_PAGE_QUERY_KEY) . '">';
+
+        foreach ($per_page_options as $option) {
+            $selected = $option === $per_page ? ' selected' : '';
+            echo '<option value="' . self::escape_attr((string) $option) . '"' . $selected . '>' . self::escape(self::format_number($option)) . '</option>';
+        }
+
+        echo '</select> ';
+        echo '<button type="submit" class="button">' . self::escape(self::translate('Apply')) . '</button> ';
+        echo '<a class="button button-secondary" href="' . self::escape_url($this->admin_page_url()) . '">' . self::escape(self::translate('Reset')) . '</a>';
+        echo '</p>';
+        echo '</form>';
+    }
+
+    private function render_bulk_actions_controls(): void
+    {
+        echo '<p>';
+        echo '<label for="clicklink-bulk-action" class="screen-reader-text">' . self::escape(self::translate('Bulk actions')) . '</label>';
+        echo '<select id="clicklink-bulk-action" name="bulk_action">';
+        echo '<option value="">' . self::escape(self::translate('Bulk actions')) . '</option>';
+        echo '<option value="delete">' . self::escape(self::translate('Delete selected')) . '</option>';
+        echo '</select> ';
+        echo '<button type="submit" class="button action">' . self::escape(self::translate('Apply')) . '</button>';
+        echo '</p>';
+    }
+
+    private function render_mappings_pagination(
+        array $query_args,
+        int $current_page,
+        int $per_page,
+        int $total_pages,
+        int $total_rows,
+        int $rows_on_page
+    ): void {
+        $start_index = $total_rows > 0 ? (($current_page - 1) * $per_page) + 1 : 0;
+        $end_index = $total_rows > 0 ? ($start_index + $rows_on_page - 1) : 0;
+
+        echo '<p class="description">';
+        echo self::escape(
+            sprintf(
+                (string) self::translate('Showing %1$s-%2$s of %3$s mappings.'),
+                self::format_number($start_index),
+                self::format_number($end_index),
+                self::format_number($total_rows)
+            )
+        );
+        echo '</p>';
+
+        if ($total_pages <= 1) {
+            return;
+        }
+
+        $previous_link = '';
+        $next_link = '';
+
+        if ($current_page > 1) {
+            $previous_link = $this->mapping_table_url(
+                array_merge(
+                    $query_args,
+                    array(
+                        'page' => $current_page - 1,
+                    )
+                )
+            );
+        }
+
+        if ($current_page < $total_pages) {
+            $next_link = $this->mapping_table_url(
+                array_merge(
+                    $query_args,
+                    array(
+                        'page' => $current_page + 1,
+                    )
+                )
+            );
+        }
+
+        echo '<p>';
+
+        if ($previous_link !== '') {
+            echo '<a class="button" href="' . self::escape_url($previous_link) . '">' . self::escape(self::translate('Previous page')) . '</a> ';
+        } else {
+            echo '<span class="button disabled" aria-disabled="true">' . self::escape(self::translate('Previous page')) . '</span> ';
+        }
+
+        echo '<span>' . self::escape(
+            sprintf(
+                (string) self::translate('Page %1$s of %2$s'),
+                self::format_number($current_page),
+                self::format_number($total_pages)
+            )
+        ) . '</span> ';
+
+        if ($next_link !== '') {
+            echo '<a class="button" href="' . self::escape_url($next_link) . '">' . self::escape(self::translate('Next page')) . '</a>';
+        } else {
+            echo '<span class="button disabled" aria-disabled="true">' . self::escape(self::translate('Next page')) . '</span>';
+        }
+
+        echo '</p>';
+    }
+
+    private function render_sort_link(array $query_args, string $label, string $sort_by): string
+    {
+        $active_sort_by = (string) ($query_args['sort_by'] ?? 'keyword');
+        $active_sort_direction = (string) ($query_args['sort_direction'] ?? 'asc');
+        $is_active = $active_sort_by === $sort_by;
+        $next_direction = 'asc';
+        $indicator = '';
+
+        if ($is_active) {
+            $next_direction = $active_sort_direction === 'asc' ? 'desc' : 'asc';
+            $indicator = $active_sort_direction === 'asc' ? ' ↑' : ' ↓';
+        }
+
+        $url = $this->mapping_table_url(
+            array_merge(
+                $query_args,
+                array(
+                    'sort_by' => $sort_by,
+                    'sort_direction' => $next_direction,
+                    'page' => 1,
+                )
+            )
+        );
+
+        return '<a href="' . self::escape_url($url) . '">' . self::escape($label . $indicator) . '</a>';
+    }
+
+    private function render_mapping_query_hidden_inputs(array $query_args): void
+    {
+        $serialized_args = $this->mapping_table_query_args_to_request_values($query_args);
+
+        foreach ($serialized_args as $key => $value) {
+            echo '<input type="hidden" name="' . self::escape_attr($key) . '" value="' . self::escape_attr($value) . '">';
+        }
+    }
+
+    private function bulk_deleted_notice_message(): string
+    {
+        $deleted_count = Runtime::non_negative_int(self::request_get(self::BULK_DELETED_COUNT_QUERY_KEY));
+
+        if ($deleted_count <= 0) {
+            return self::translate('Selected mappings deleted.');
+        }
+
+        return sprintf(
+            (string) self::translate('Deleted %s mapping row(s).'),
+            self::format_number($deleted_count)
+        );
+    }
+
+    private function mapping_table_url(array $query_args): string
+    {
+        return self::add_query_args(
+            $this->mapping_table_query_args_to_request_values($query_args),
+            $this->admin_page_url()
+        );
+    }
+
+    /**
+     * @return array{
+     *   search: string,
+     *   keyword_filter: string,
+     *   sort_by: string,
+     *   sort_direction: string,
+     *   page: int,
+     *   per_page: int
+     * }
+     */
+    private function mapping_table_query_args_from_get(): array
+    {
+        return $this->normalize_mapping_table_query_args(
+            array(
+                'search' => self::request_get(self::MAPPINGS_SEARCH_QUERY_KEY),
+                'keyword_filter' => self::request_get(self::MAPPINGS_KEYWORD_FILTER_QUERY_KEY),
+                'sort_by' => self::request_get(self::MAPPINGS_SORT_QUERY_KEY),
+                'sort_direction' => self::request_get(self::MAPPINGS_ORDER_QUERY_KEY),
+                'page' => self::request_get(self::MAPPINGS_PAGE_QUERY_KEY),
+                'per_page' => self::request_get(self::MAPPINGS_PER_PAGE_QUERY_KEY),
+            )
+        );
+    }
+
+    /**
+     * @return array{
+     *   search: string,
+     *   keyword_filter: string,
+     *   sort_by: string,
+     *   sort_direction: string,
+     *   page: int,
+     *   per_page: int
+     * }
+     */
+    private function mapping_table_query_args_from_post(): array
+    {
+        return $this->normalize_mapping_table_query_args(
+            array(
+                'search' => self::request_post(self::MAPPINGS_SEARCH_QUERY_KEY),
+                'keyword_filter' => self::request_post(self::MAPPINGS_KEYWORD_FILTER_QUERY_KEY),
+                'sort_by' => self::request_post(self::MAPPINGS_SORT_QUERY_KEY),
+                'sort_direction' => self::request_post(self::MAPPINGS_ORDER_QUERY_KEY),
+                'page' => self::request_post(self::MAPPINGS_PAGE_QUERY_KEY),
+                'per_page' => self::request_post(self::MAPPINGS_PER_PAGE_QUERY_KEY),
+            )
+        );
+    }
+
+    /**
+     * @param array<string, string> $query_args
+     * @return array{
+     *   search: string,
+     *   keyword_filter: string,
+     *   sort_by: string,
+     *   sort_direction: string,
+     *   page: int,
+     *   per_page: int
+     * }
+     */
+    private function normalize_mapping_table_query_args(array $query_args): array
+    {
+        $search = self::sanitize_search_input((string) ($query_args['search'] ?? ''));
+        $keyword_filter = self::sanitize_search_input((string) ($query_args['keyword_filter'] ?? ''));
+        $sort_by = self::normalize_sort_by((string) ($query_args['sort_by'] ?? 'keyword'));
+        $sort_direction = self::normalize_sort_direction((string) ($query_args['sort_direction'] ?? 'asc'));
+        $page = Runtime::positive_int((string) ($query_args['page'] ?? '1'));
+        $per_page = Runtime::positive_int((string) ($query_args['per_page'] ?? (string) self::DEFAULT_MAPPINGS_PER_PAGE));
+
+        if ($page <= 0) {
+            $page = 1;
+        }
+
+        if ($per_page <= 0) {
+            $per_page = self::DEFAULT_MAPPINGS_PER_PAGE;
+        }
+
+        $per_page = min(self::MAX_MAPPINGS_PER_PAGE, $per_page);
+
+        return array(
+            'search' => $search,
+            'keyword_filter' => $keyword_filter,
+            'sort_by' => $sort_by,
+            'sort_direction' => $sort_direction,
+            'page' => $page,
+            'per_page' => $per_page,
+        );
+    }
+
+    /**
+     * @param array{
+     *   search: string,
+     *   keyword_filter: string,
+     *   sort_by: string,
+     *   sort_direction: string,
+     *   page: int,
+     *   per_page: int
+     * } $query_args
+     * @return array<string, string>
+     */
+    private function mapping_table_query_args_to_request_values(array $query_args): array
+    {
+        $page = Runtime::positive_int((string) ($query_args['page'] ?? '1'));
+        $per_page = Runtime::positive_int((string) ($query_args['per_page'] ?? (string) self::DEFAULT_MAPPINGS_PER_PAGE));
+
+        if ($page <= 0) {
+            $page = 1;
+        }
+
+        if ($per_page <= 0) {
+            $per_page = self::DEFAULT_MAPPINGS_PER_PAGE;
+        }
+
+        $per_page = min(self::MAX_MAPPINGS_PER_PAGE, $per_page);
+
+        return array(
+            self::MAPPINGS_SEARCH_QUERY_KEY => (string) ($query_args['search'] ?? ''),
+            self::MAPPINGS_KEYWORD_FILTER_QUERY_KEY => (string) ($query_args['keyword_filter'] ?? ''),
+            self::MAPPINGS_SORT_QUERY_KEY => (string) ($query_args['sort_by'] ?? 'keyword'),
+            self::MAPPINGS_ORDER_QUERY_KEY => (string) ($query_args['sort_direction'] ?? 'asc'),
+            self::MAPPINGS_PAGE_QUERY_KEY => (string) $page,
+            self::MAPPINGS_PER_PAGE_QUERY_KEY => (string) $per_page,
+        );
+    }
+
+    private static function sanitize_search_input(string $value): string
+    {
+        $value = trim($value);
+
+        if (function_exists('sanitize_text_field')) {
+            return sanitize_text_field($value);
+        }
+
+        return trim(strip_tags($value));
+    }
+
+    private static function normalize_sort_by(string $value): string
+    {
+        $normalized = strtolower(trim($value));
+        $allowed = array('keyword', 'url', 'updated_at', 'created_at', 'id');
+
+        if (! in_array($normalized, $allowed, true)) {
+            return 'keyword';
+        }
+
+        return $normalized;
+    }
+
+    private static function normalize_sort_direction(string $value): string
+    {
+        return strtolower(trim($value)) === 'desc' ? 'desc' : 'asc';
     }
 
     /**
@@ -702,10 +1157,16 @@ final class Admin_Page
         return wp_verify_nonce($nonce, $action) !== false;
     }
 
-    private function redirect_with_notice(string $notice_code): void
+    /**
+     * @param array<string, string> $additional_query_args
+     */
+    private function redirect_with_notice(string $notice_code, array $additional_query_args = array()): void
     {
         $redirect_url = self::add_query_args(
-            array(self::NOTICE_QUERY_KEY => $notice_code),
+            array_merge(
+                $additional_query_args,
+                array(self::NOTICE_QUERY_KEY => $notice_code)
+            ),
             $this->admin_page_url()
         );
 
@@ -832,6 +1293,51 @@ final class Admin_Page
         }
 
         return self::unslash((string) $_GET[$key]);
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private static function request_post_id_list(string $key): array
+    {
+        if (! isset($_POST[$key])) {
+            return array();
+        }
+
+        $raw_value = $_POST[$key];
+        $raw_values = array();
+
+        if (is_array($raw_value)) {
+            foreach ($raw_value as $value) {
+                if (! is_scalar($value)) {
+                    continue;
+                }
+
+                $raw_values[] = self::unslash((string) $value);
+            }
+        } elseif (is_scalar($raw_value)) {
+            $raw_values = explode(',', self::unslash((string) $raw_value));
+        } else {
+            return array();
+        }
+
+        $normalized_map = array();
+
+        foreach ($raw_values as $value) {
+            $mapping_id = Runtime::positive_int(trim($value));
+
+            if ($mapping_id <= 0) {
+                continue;
+            }
+
+            $normalized_map[$mapping_id] = $mapping_id;
+        }
+
+        if ($normalized_map === array()) {
+            return array();
+        }
+
+        return array_values($normalized_map);
     }
 
     private static function unslash(string $value): string

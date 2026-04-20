@@ -20,10 +20,13 @@ This phase turns ClickLink into a polished, release-ready plugin by expanding ac
   - Completed 2026-04-20: Updated `Dashboard_Widget` to render required headline metrics plus posts-with-links, latest backfill-run link totals, average links per changed post, and a top-keyword leaderboard with empty-state messaging.
   - Completed 2026-04-20: Added regression coverage in dashboard, linker, backfill scanner, and prototype smoke tests to verify metric coherence across repeated save/backfill runs.
 
-- [ ] Improve admin mappings UX for larger datasets:
+- [x] Improve admin mappings UX for larger datasets:
   - Add search/filter/sort and pagination for keyword/url rows while preserving duplicate-keyword support
   - Add bulk actions for row deletion and validation feedback for malformed URLs/empty keywords
   - Keep all admin interactions nonce-protected and capability-gated
+  - Completed 2026-04-20: Added paginated mapping queries in `Keyword_Mapping_Repository` and upgraded `Admin_Page` with search, keyword filtering, sortable columns, per-page controls, and pagination links while retaining duplicate-keyword row visibility.
+  - Completed 2026-04-20: Added nonce-protected `clicklink_bulk_delete_mappings` admin action with capability checks, selected-row deletion, and user-facing success/error notices (including deleted-row counts).
+  - Completed 2026-04-20: Expanded admin validation feedback to distinguish empty keyword, empty URL, and malformed URL input; added comprehensive regression assertions in `tests/test-admin-page.php` for new UX and security behavior.
 
 - [ ] Add operational safety controls and diagnostics:
   - Implement a safe reset tool for stats/backfill run state (without deleting mappings unless explicitly chosen)

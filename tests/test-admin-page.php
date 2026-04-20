@@ -103,9 +103,25 @@ final class ClickLink_Test_Admin_WPDB
             return $query;
         }
 
-        $value = (int) ($args[0] ?? 0);
+        $arg_index = 0;
 
-        return str_replace('%d', (string) $value, $query);
+        return (string) preg_replace_callback(
+            '/%[ds]/',
+            static function (array $matches) use (&$arg_index, $args): string {
+                $placeholder = $matches[0] ?? '';
+                $value = $args[$arg_index] ?? '';
+                $arg_index++;
+
+                if ($placeholder === '%d') {
+                    return (string) ((int) $value);
+                }
+
+                $string_value = str_replace("'", "''", (string) $value);
+
+                return "'" . $string_value . "'";
+            },
+            $query
+        );
     }
 
     /**
@@ -139,6 +155,24 @@ final class ClickLink_Test_Admin_WPDB
      */
     public function get_results(string $query, string $output = 'OBJECT'): array
     {
+        if (str_contains($query, 'SELECT id, keyword, url, created_at, updated_at FROM')) {
+            return $this->query_mapping_rows($query, true);
+        }
+
+        if (str_contains($query, 'SELECT keyword, url FROM')) {
+            $rows = $this->query_mapping_rows($query, false);
+            $results = array();
+
+            foreach ($rows as $row) {
+                $results[] = array(
+                    'keyword' => (string) ($row['keyword'] ?? ''),
+                    'url' => (string) ($row['url'] ?? ''),
+                );
+            }
+
+            return $results;
+        }
+
         $rows = array_values($this->rows);
 
         usort(
@@ -168,6 +202,10 @@ final class ClickLink_Test_Admin_WPDB
             return 0;
         }
 
+        if (str_contains($query, 'clicklink_keyword_mappings')) {
+            return count($this->query_mapping_rows($query, false));
+        }
+
         return max(0, $this->eligible_posts_count);
     }
 
@@ -177,6 +215,147 @@ final class ClickLink_Test_Admin_WPDB
     public function get_col(string $query): array
     {
         return array();
+    }
+
+    public function esc_like(string $value): string
+    {
+        return addcslashes($value, "\\%_");
+    }
+
+    /**
+     * @return array<int, array{id: int, keyword: string, url: string, created_at: string, updated_at: string}>
+     */
+    private function query_mapping_rows(string $query, bool $respect_pagination): array
+    {
+        $rows = array_values($this->rows);
+        $search_like = '';
+        $keyword_like = '';
+        $order_column = 'keyword';
+        $order_direction = 'ASC';
+        $limit = null;
+        $offset = 0;
+
+        if (preg_match("/\\(keyword LIKE '([^']*)' OR url LIKE '([^']*)'\\)/", $query, $search_matches) === 1) {
+            $search_like = (string) ($search_matches[1] ?? '');
+        }
+
+        if (preg_match("/AND keyword LIKE '([^']*)'/", $query, $keyword_matches) === 1) {
+            $keyword_like = (string) ($keyword_matches[1] ?? '');
+        }
+
+        if (preg_match('/ORDER BY\\s+([a-z_]+)\\s+(ASC|DESC)/i', $query, $order_matches) === 1) {
+            $order_column = strtolower((string) ($order_matches[1] ?? 'keyword'));
+            $order_direction = strtoupper((string) ($order_matches[2] ?? 'ASC'));
+        }
+
+        if ($respect_pagination && preg_match('/LIMIT\\s+(\\d+)\\s+OFFSET\\s+(\\d+)/i', $query, $limit_matches) === 1) {
+            $limit = max(0, (int) ($limit_matches[1] ?? 0));
+            $offset = max(0, (int) ($limit_matches[2] ?? 0));
+        }
+
+        if (str_contains($query, "keyword <> ''")) {
+            $rows = array_values(
+                array_filter(
+                    $rows,
+                    static function (array $row): bool {
+                        return ((string) ($row['keyword'] ?? '')) !== '';
+                    }
+                )
+            );
+        }
+
+        if (str_contains($query, "url <> ''")) {
+            $rows = array_values(
+                array_filter(
+                    $rows,
+                    static function (array $row): bool {
+                        return ((string) ($row['url'] ?? '')) !== '';
+                    }
+                )
+            );
+        }
+
+        if ($search_like !== '') {
+            $rows = array_values(
+                array_filter(
+                    $rows,
+                    function (array $row) use ($search_like): bool {
+                        $keyword = (string) ($row['keyword'] ?? '');
+                        $url = (string) ($row['url'] ?? '');
+                        return $this->matches_like_pattern($keyword, $search_like)
+                            || $this->matches_like_pattern($url, $search_like);
+                    }
+                )
+            );
+        }
+
+        if ($keyword_like !== '') {
+            $rows = array_values(
+                array_filter(
+                    $rows,
+                    function (array $row) use ($keyword_like): bool {
+                        $keyword = (string) ($row['keyword'] ?? '');
+                        return $this->matches_like_pattern($keyword, $keyword_like);
+                    }
+                )
+            );
+        }
+
+        usort(
+            $rows,
+            static function (array $left, array $right) use ($order_column, $order_direction): int {
+                $left_value = (string) ($left[$order_column] ?? '');
+                $right_value = (string) ($right[$order_column] ?? '');
+                $comparison = strcmp($left_value, $right_value);
+
+                if ($comparison === 0) {
+                    $comparison = ((int) ($left['id'] ?? 0)) <=> ((int) ($right['id'] ?? 0));
+                }
+
+                if ($order_direction === 'DESC') {
+                    return -1 * $comparison;
+                }
+
+                return $comparison;
+            }
+        );
+
+        if ($respect_pagination && $limit !== null) {
+            $rows = array_slice($rows, $offset, $limit);
+        }
+
+        return $rows;
+    }
+
+    private function matches_like_pattern(string $value, string $like_pattern): bool
+    {
+        $pattern = str_replace("''", "'", $like_pattern);
+        $regex = '';
+        $length = strlen($pattern);
+
+        for ($index = 0; $index < $length; $index++) {
+            $character = $pattern[$index];
+
+            if ($character === '\\' && ($index + 1) < $length) {
+                $index++;
+                $regex .= preg_quote($pattern[$index], '/');
+                continue;
+            }
+
+            if ($character === '%') {
+                $regex .= '.*';
+                continue;
+            }
+
+            if ($character === '_') {
+                $regex .= '.';
+                continue;
+            }
+
+            $regex .= preg_quote($character, '/');
+        }
+
+        return preg_match('/^' . $regex . '$/i', $value) === 1;
     }
 }
 
@@ -472,6 +651,10 @@ $assert(
     'Expected register() to hook delete mapping admin_post action.'
 );
 $assert(
+    isset($clicklink_test_actions['admin_post_clicklink_bulk_delete_mappings']),
+    'Expected register() to hook bulk delete mappings admin_post action.'
+);
+$assert(
     isset($clicklink_test_actions['admin_post_clicklink_backfill_start']),
     'Expected register() to hook manual backfill start admin_post action.'
 );
@@ -564,6 +747,10 @@ $assert(
     str_contains($rendered_output_with_posts, '<button type="submit" class="button button-primary">Run Now</button>'),
     'Expected Run Now scanner button to be enabled when eligible published posts exist.'
 );
+$assert(
+    str_contains($rendered_output_with_posts, 'Rows per page'),
+    'Expected mappings toolbar to render rows-per-page controls for larger datasets.'
+);
 
 $_POST = array(
     '_wpnonce' => 'nonce-clicklink_save_mapping',
@@ -625,8 +812,34 @@ $assert(
     'Did not expect invalid URLs to create mapping rows.'
 );
 $assert(
-    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_input'),
-    'Expected invalid input redirect notice for malformed URLs.'
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_url'),
+    'Expected malformed URL submissions to surface invalid_url notices.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_save_mapping',
+    'keyword' => '    ',
+    'url' => 'https://example.com/keyword-required',
+);
+$page->handle_save_mapping();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=keyword_required'),
+    'Expected blank keywords to return keyword_required validation feedback.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_save_mapping',
+    'keyword' => 'Keyword',
+    'url' => '   ',
+);
+$page->handle_save_mapping();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=url_required'),
+    'Expected blank URL submissions to return url_required validation feedback.'
 );
 
 $_POST = array(
@@ -640,6 +853,168 @@ $latest_redirect = end($clicklink_test_redirects);
 $assert(
     is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
     'Expected nonce failures to redirect with invalid_nonce notice.'
+);
+
+for ($index = 0; $index < 24; $index++) {
+    $wpdb->insert(
+        'wp_clicklink_keyword_mappings',
+        array(
+            'keyword' => sprintf('Batch Keyword %02d', $index + 1),
+            'url' => sprintf('https://example.com/batch-%02d', $index + 1),
+            'created_at' => '2026-04-20 00:00:00',
+            'updated_at' => sprintf('2026-04-20 00:%02d:00', $index % 60),
+        ),
+        array('%s', '%s', '%s', '%s')
+    );
+}
+
+$wpdb->insert(
+    'wp_clicklink_keyword_mappings',
+    array(
+        'keyword' => 'Promo',
+        'url' => 'https://example.com/promo-a',
+        'created_at' => '2026-04-20 00:00:00',
+        'updated_at' => '2026-04-20 01:00:00',
+    ),
+    array('%s', '%s', '%s', '%s')
+);
+$wpdb->insert(
+    'wp_clicklink_keyword_mappings',
+    array(
+        'keyword' => 'Promo',
+        'url' => 'https://example.com/promo-b',
+        'created_at' => '2026-04-20 00:00:00',
+        'updated_at' => '2026-04-20 01:01:00',
+    ),
+    array('%s', '%s', '%s', '%s')
+);
+
+$_GET = array(
+    'clicklink_mappings_sort' => 'updated_at',
+    'clicklink_mappings_order' => 'desc',
+    'clicklink_mappings_page' => '2',
+    'clicklink_mappings_per_page' => '10',
+);
+$_POST = array();
+ob_start();
+$page->render();
+$paged_render = (string) ob_get_clean();
+
+$assert(
+    str_contains($paged_render, 'Page 2 of'),
+    'Expected mappings view pagination labels when dataset exceeds one page.'
+);
+$assert(
+    str_contains($paged_render, 'Previous page'),
+    'Expected mappings view to render previous-page controls on later pages.'
+);
+$assert(
+    str_contains($paged_render, 'Next page'),
+    'Expected mappings view to render next-page controls on non-terminal pages.'
+);
+$assert(
+    str_contains($paged_render, 'clicklink_mappings_sort=updated_at'),
+    'Expected mappings sort links to preserve/emit sort query arguments.'
+);
+$assert(
+    str_contains($paged_render, 'Delete selected'),
+    'Expected mappings toolbar to include a bulk delete action.'
+);
+
+$_GET = array(
+    'clicklink_mappings_keyword' => 'Promo',
+    'clicklink_mappings_per_page' => '50',
+);
+$_POST = array();
+ob_start();
+$page->render();
+$promo_filtered_render = (string) ob_get_clean();
+$promo_row_count = preg_match_all('/<code>Promo<\\/code>/', $promo_filtered_render, $promo_matches);
+
+$assert(
+    $promo_row_count === 2,
+    'Expected keyword filtering to preserve duplicate keyword rows in admin listings.'
+);
+$assert(
+    str_contains($promo_filtered_render, 'https://example.com/promo-a')
+        && str_contains($promo_filtered_render, 'https://example.com/promo-b'),
+    'Expected duplicate keyword rows with distinct URLs to remain independently visible after filtering.'
+);
+
+$promo_ids = array();
+foreach ($wpdb->rows as $row) {
+    if (($row['keyword'] ?? '') !== 'Promo') {
+        continue;
+    }
+
+    $promo_ids[] = (int) ($row['id'] ?? 0);
+}
+
+sort($promo_ids, SORT_NUMERIC);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_bulk_delete_mappings',
+    'bulk_action' => 'delete',
+    'mapping_ids' => array_map(static fn (int $id): string => (string) $id, $promo_ids),
+    'clicklink_mappings_search' => '',
+    'clicklink_mappings_keyword' => 'Promo',
+    'clicklink_mappings_sort' => 'keyword',
+    'clicklink_mappings_order' => 'asc',
+    'clicklink_mappings_page' => '1',
+    'clicklink_mappings_per_page' => '50',
+);
+$page->handle_bulk_delete_mappings();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    count($promo_ids) === 2
+        && ! isset($wpdb->rows[$promo_ids[0]])
+        && ! isset($wpdb->rows[$promo_ids[1]]),
+    'Expected bulk delete actions to remove all selected mapping rows.'
+);
+$assert(
+    is_string($latest_redirect)
+        && str_contains($latest_redirect, 'clicklink_notice=bulk_deleted')
+        && str_contains($latest_redirect, 'clicklink_deleted_count=2'),
+    'Expected bulk delete redirects to include both success notice and deleted-row count.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_bulk_delete_mappings',
+    'bulk_action' => '',
+    'mapping_ids' => array((string) $mapping_id),
+);
+$page->handle_bulk_delete_mappings();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=bulk_action_required'),
+    'Expected bulk delete requests without an action to return bulk_action_required notices.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_bulk_delete_mappings',
+    'bulk_action' => 'delete',
+);
+$page->handle_bulk_delete_mappings();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=bulk_selection_required'),
+    'Expected bulk delete requests without selected rows to return bulk_selection_required notices.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'bad-nonce',
+    'bulk_action' => 'delete',
+    'mapping_ids' => array((string) $mapping_id),
+);
+$page->handle_bulk_delete_mappings();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
+    'Expected bulk delete requests to enforce nonce validation.'
 );
 
 $wpdb->eligible_posts_count = 0;
@@ -892,6 +1267,24 @@ try {
 $assert(
     $threw_for_start_scan_capability === true,
     'Expected start scan handler to deny access when capability checks fail.'
+);
+
+$threw_for_bulk_delete_capability = false;
+
+try {
+    $_POST = array(
+        '_wpnonce' => 'nonce-clicklink_bulk_delete_mappings',
+        'bulk_action' => 'delete',
+        'mapping_ids' => array('1'),
+    );
+    $page->handle_bulk_delete_mappings();
+} catch (RuntimeException $exception) {
+    $threw_for_bulk_delete_capability = true;
+}
+
+$assert(
+    $threw_for_bulk_delete_capability === true,
+    'Expected bulk delete handler to deny access when capability checks fail.'
 );
 
 $_POST = array();
