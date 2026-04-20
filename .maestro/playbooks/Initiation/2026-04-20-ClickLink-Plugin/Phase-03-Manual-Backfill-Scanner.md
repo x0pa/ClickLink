@@ -13,10 +13,14 @@ This phase adds a manual “Run Now” scanner that processes older blog posts w
     - Defined single-site manual scan flow for `post_type=post` + `post_status=publish` batches only, with explicit exclusions for multisite paths and any cron/scheduler automation.
     - Confirmed scanner state machine and persistence contract before implementation: `pending/running/completed/error` stored in a dedicated non-autoload option with cursor + run counters; full design captured in `docs/architecture/manual-backfill-scanner-design.md`.
 
-- [ ] Implement backfill orchestration service with batch processing:
+- [x] Implement backfill orchestration service with batch processing:
   - Create a scanner service that fetches eligible posts in fixed batches and tracks cursor/progress state
   - Persist run metadata (started_at, completed_at, processed_posts, inserted_links, failures) for admin visibility
   - Ensure idempotent behavior so reruns do not duplicate links in already-linked regions
+  - Completion notes (2026-04-20, loop 00001):
+    - Added `ClickLink\Backfill_Scanner` with cursor-based published-post batching (`ID` ascending), explicit state transitions (`pending/running/completed/error`), and non-autoload run-state persistence in `clicklink_backfill_run_state`.
+    - Persisted run metadata for admin visibility: `started_at`, `completed_at`, `processed_posts`, `changed_posts`, `inserted_links`, `failures`, `last_error`, `batch_size`, and `total_eligible_posts`.
+    - Extended `Post_Save_Linker` with reusable `process_post()` orchestration entrypoint so scanner runs reuse the existing save-time linker/statistics behavior; verified idempotent reruns do not create duplicate links.
 
 - [ ] Build admin “Run Now” control surface:
   - Add a dedicated ClickLink admin screen section with start button, run summary, and current status

@@ -63,16 +63,31 @@ final class Post_Save_Linker
      */
     public function handle_post_save(int $post_id, $post, bool $update): void
     {
+        $this->process_post($post_id, $post, $update);
+    }
+
+    /**
+     * @param mixed $post
+     * @return array{processed: bool, changed: bool, inserted_links: int}
+     */
+    public function process_post(int $post_id, $post, bool $update = true): array
+    {
+        $result = array(
+            'processed' => false,
+            'changed' => false,
+            'inserted_links' => 0,
+        );
+
         if ($post_id <= 0) {
-            return;
+            return $result;
         }
 
         if (isset($this->active_updates[$post_id])) {
-            return;
+            return $result;
         }
 
         if (! is_object($post)) {
-            return;
+            return $result;
         }
 
         $post_type = isset($post->post_type) && is_string($post->post_type)
@@ -80,12 +95,14 @@ final class Post_Save_Linker
             : '';
 
         if ($post_type !== 'post') {
-            return;
+            return $result;
         }
 
         if ($this->is_autosave_or_revision($post_id)) {
-            return;
+            return $result;
         }
+
+        $result['processed'] = true;
 
         $content = isset($post->post_content) && is_string($post->post_content)
             ? $post->post_content
@@ -93,7 +110,7 @@ final class Post_Save_Linker
         $current_hash = $this->content_hash($content);
 
         if ($update && $this->is_unchanged_content_save($post_id, $current_hash)) {
-            return;
+            return $result;
         }
 
         $mappings = $this->mapping_repository->fetch_grouped_keyword_urls();
@@ -101,7 +118,7 @@ final class Post_Save_Linker
         if ($mappings === array()) {
             $this->persist_content_hash($post_id, $current_hash);
             $this->stats->record_save_metrics($post_id, 0);
-            return;
+            return $result;
         }
 
         $max_links_per_post = $this->max_links_per_post();
@@ -109,27 +126,41 @@ final class Post_Save_Linker
         if ($max_links_per_post <= 0) {
             $this->persist_content_hash($post_id, $current_hash);
             $this->stats->record_save_metrics($post_id, 0);
-            return;
+            return $result;
         }
 
-        $result = $this->link_content($content, $mappings, $max_links_per_post);
-        $linked_content = (string) ($result['content'] ?? $content);
-        $links_inserted = (int) ($result['inserted_links'] ?? 0);
+        $link_result = $this->link_content($content, $mappings, $max_links_per_post);
+        $linked_content = (string) ($link_result['content'] ?? $content);
+        $links_inserted = (int) ($link_result['inserted_links'] ?? 0);
 
         if ($links_inserted <= 0 || $linked_content === $content) {
             $this->persist_content_hash($post_id, $current_hash);
             $this->stats->record_save_metrics($post_id, 0);
-            return;
+            return array(
+                'processed' => true,
+                'changed' => false,
+                'inserted_links' => 0,
+            );
         }
 
         if ($this->update_post_content($post_id, $linked_content)) {
             $this->persist_content_hash($post_id, $this->content_hash($linked_content));
             $this->stats->record_save_metrics($post_id, $links_inserted);
-            return;
+            return array(
+                'processed' => true,
+                'changed' => true,
+                'inserted_links' => max(0, $links_inserted),
+            );
         }
 
         $this->persist_content_hash($post_id, $current_hash);
         $this->stats->record_save_metrics($post_id, 0);
+
+        return array(
+            'processed' => true,
+            'changed' => false,
+            'inserted_links' => 0,
+        );
     }
 
     private function is_autosave_or_revision(int $post_id): bool

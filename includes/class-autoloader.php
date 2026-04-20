@@ -28,6 +28,7 @@ final class Autoloader
             'Keyword_Mapping_Repository' => CLICKLINK_PATH . 'includes/class-keyword-mapping-repository.php',
             'Linker_Stats' => CLICKLINK_PATH . 'includes/class-linker-stats.php',
             'Post_Save_Linker' => CLICKLINK_PATH . 'includes/class-post-save-linker.php',
+            'Backfill_Scanner' => CLICKLINK_PATH . 'includes/class-backfill-scanner.php',
             'Admin\\Admin_Page' => CLICKLINK_PATH . 'admin/class-admin-page.php',
             'Admin\\Dashboard_Widget' => CLICKLINK_PATH . 'admin/class-dashboard-widget.php',
         );

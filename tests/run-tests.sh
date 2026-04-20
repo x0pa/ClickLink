@@ -8,4 +8,5 @@ php tests/test-installer.php
 php tests/test-lifecycle.php
 php tests/test-linker-focused.php
 php tests/test-post-save-linker.php
+php tests/test-backfill-scanner.php
 php tests/test-prototype-smoke.php
