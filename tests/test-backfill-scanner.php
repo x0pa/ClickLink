@@ -11,6 +11,8 @@ final class ClickLink_Test_Backfill_WPDB
      * @var array<int, array{keyword: string, url: string}>
      */
     public array $mappings = array();
+    public int $mapping_query_calls = 0;
+    public int $eligible_post_query_calls = 0;
 
     /**
      * @return array<int, array{keyword: string, url: string}>
@@ -21,6 +23,8 @@ final class ClickLink_Test_Backfill_WPDB
             return array();
         }
 
+        $this->mapping_query_calls++;
+
         return $this->mappings;
     }
 
@@ -30,6 +34,8 @@ final class ClickLink_Test_Backfill_WPDB
     public function get_col(string $query): array
     {
         global $clicklink_test_posts;
+
+        $this->eligible_post_query_calls++;
 
         $cursor_post_id = 0;
         $batch_limit = 20;
@@ -367,6 +373,7 @@ require_once __DIR__ . '/../includes/class-linker-stats.php';
 require_once __DIR__ . '/../includes/class-post-save-linker.php';
 require_once __DIR__ . '/../includes/class-backfill-scanner.php';
 require_once __DIR__ . '/fixtures/linker-content.php';
+require_once __DIR__ . '/fixtures/performance-fixtures.php';
 
 $failures = array();
 
@@ -424,6 +431,14 @@ $reset_environment = static function (): void {
                 'url' => 'https://example.com/apple',
             ),
         );
+
+        if (property_exists($wpdb, 'mapping_query_calls')) {
+            $wpdb->mapping_query_calls = 0;
+        }
+
+        if (property_exists($wpdb, 'eligible_post_query_calls')) {
+            $wpdb->eligible_post_query_calls = 0;
+        }
     }
 };
 
@@ -431,6 +446,21 @@ $count_link_matches = static function (string $content): int {
     $matches = array();
 
     return max(0, (int) preg_match_all('/href="https:\/\/example\.com\/apple"/', $content, $matches));
+};
+
+$run_scanner_until_terminal = static function (\ClickLink\Backfill_Scanner $scanner, int $max_iterations = 50): array {
+    $state = $scanner->get_state();
+
+    for ($iteration = 0; $iteration < $max_iterations; $iteration++) {
+        $state = $scanner->process_next_batch();
+        $status = (string) ($state['status'] ?? '');
+
+        if ($status !== 'running') {
+            return $state;
+        }
+    }
+
+    return $state;
 };
 
 $reset_environment();
@@ -738,6 +768,128 @@ $assert(
         && str_contains($updated_exclusion_content, '<textarea>alpha hidden</textarea>')
         && str_contains($updated_exclusion_content, '<h3>alpha heading</h3>'),
     'Expected scanner integration run to preserve excluded contexts (script/style/textarea/headings) while linking paragraph text.'
+);
+
+$reset_environment();
+$clicklink_test_posts = array(
+    1101 => array(
+        'post_type' => 'post',
+        'post_status' => 'publish',
+        'post_content' => '<p>apple save-time link.</p>',
+    ),
+    1102 => array(
+        'post_type' => 'post',
+        'post_status' => 'publish',
+        'post_content' => '<p>apple apple backfill link.</p>',
+    ),
+    1103 => array(
+        'post_type' => 'post',
+        'post_status' => 'publish',
+        'post_content' => '<p>No mapped keyword in this paragraph.</p>',
+    ),
+);
+$wpdb->mappings = array(
+    array(
+        'keyword' => 'apple',
+        'url' => 'https://example.com/apple',
+    ),
+);
+$integration_linker = new \ClickLink\Post_Save_Linker();
+$integration_save_result = $integration_linker->process_post(1101, get_post(1101), false);
+
+$assert(
+    (bool) ($integration_save_result['processed'] ?? false)
+        && (bool) ($integration_save_result['changed'] ?? false)
+        && (int) ($integration_save_result['inserted_links'] ?? 0) === 1,
+    'Expected acceptance flow to insert links during save-time linking before running manual backfill.'
+);
+
+$integration_stats_after_save = get_option('clicklink_stats', array());
+$assert(
+    is_array($integration_stats_after_save)
+        && (int) ($integration_stats_after_save['total_links_inserted'] ?? -1) === 1
+        && (int) ($integration_stats_after_save['posts_touched'] ?? -1) === 1
+        && (int) (($integration_stats_after_save['keyword_match_counts']['apple'] ?? 0)) === 1,
+    'Expected acceptance flow to persist coherent stats immediately after save-time linking.'
+);
+
+$integration_scanner = new \ClickLink\Backfill_Scanner($integration_linker);
+$integration_scanner->start_run(2);
+$integration_backfill_state = $run_scanner_until_terminal($integration_scanner);
+
+$assert(
+    $integration_backfill_state['status'] === 'completed'
+        && $integration_backfill_state['processed_posts'] === 3
+        && $integration_backfill_state['changed_posts'] === 1
+        && $integration_backfill_state['inserted_links'] === 2
+        && $integration_backfill_state['failures'] === 0,
+    'Expected acceptance flow to backfill only remaining eligible posts while preserving scanner counters.'
+);
+
+$integration_stats_after_backfill = get_option('clicklink_stats', array());
+$assert(
+    is_array($integration_stats_after_backfill)
+        && (int) ($integration_stats_after_backfill['total_links_inserted'] ?? -1) === 3
+        && (int) ($integration_stats_after_backfill['posts_touched'] ?? -1) === 2
+        && (int) (($integration_stats_after_backfill['keyword_match_counts']['apple'] ?? 0)) === 3,
+    'Expected acceptance flow to keep cumulative stats coherent after save-time linking plus manual backfill.'
+);
+
+$integration_scanner->start_run(2);
+$integration_rerun_state = $run_scanner_until_terminal($integration_scanner);
+
+$assert(
+    $integration_rerun_state['status'] === 'completed'
+        && $integration_rerun_state['changed_posts'] === 0
+        && $integration_rerun_state['inserted_links'] === 0,
+    'Expected acceptance reruns to remain idempotent after the initial save+backfill pipeline.'
+);
+
+$integration_stats_after_rerun = get_option('clicklink_stats', array());
+$assert(
+    is_array($integration_stats_after_rerun)
+        && $integration_stats_after_rerun === $integration_stats_after_backfill,
+    'Expected acceptance reruns to preserve the same saved stats totals and keyword counters.'
+);
+
+$reset_environment();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 1;
+$clicklink_test_posts = clicklink_fixture_large_publish_posts(120, 'performance-keyword', 2000);
+$wpdb->mappings = clicklink_fixture_large_mapping_pool(
+    89,
+    'performance-keyword',
+    'https://example.com/performance-keyword'
+);
+$performance_linker = new \ClickLink\Post_Save_Linker();
+$performance_scanner = new \ClickLink\Backfill_Scanner($performance_linker);
+$performance_scanner->start_run(25);
+$performance_state = $run_scanner_until_terminal($performance_scanner, 20);
+
+$assert(
+    $performance_state['status'] === 'completed'
+        && $performance_state['processed_posts'] === 120
+        && $performance_state['changed_posts'] === 120
+        && $performance_state['inserted_links'] === 120
+        && $performance_state['failures'] === 0,
+    'Expected large post fixtures to complete manual backfill runs with stable counters and no failures.'
+);
+
+$performance_stats = get_option('clicklink_stats', array());
+$assert(
+    is_array($performance_stats)
+        && (int) ($performance_stats['total_links_inserted'] ?? -1) === 120
+        && (int) ($performance_stats['posts_touched'] ?? -1) === 120
+        && (int) (($performance_stats['keyword_match_counts']['performance-keyword'] ?? 0)) === 120,
+    'Expected large post fixtures to keep global stats totals aligned with high-volume inserted link counts.'
+);
+
+$assert(
+    (int) ($wpdb->mapping_query_calls ?? 0) === 1,
+    'Expected large mapping fixtures to be loaded once per scanner run through repository-level mapping cache reuse.'
+);
+$assert(
+    (int) ($wpdb->eligible_post_query_calls ?? 0) <= 12,
+    'Expected large post fixtures to process with bounded eligible-post batch queries.'
 );
 
 $reset_environment();

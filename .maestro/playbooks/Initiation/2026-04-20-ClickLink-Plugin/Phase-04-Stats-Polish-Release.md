@@ -36,10 +36,14 @@ This phase turns ClickLink into a polished, release-ready plugin by expanding ac
   - Completed 2026-04-20: Added toggleable structured diagnostics via `Runtime::debug_log()` / `Runtime::is_debug_logging_enabled()` with `clicklink_debug_logging_enabled` filter and `clicklink_debug_log` action, and instrumented linker/backfill failure paths.
   - Completed 2026-04-20: Hardened `Post_Save_Linker` content handling with fail-safe guards for oversized/invalid UTF-8 content and exception-safe linking fallback; expanded admin/linker/backfill regression tests accordingly.
 
-- [ ] Write comprehensive regression and acceptance tests:
+- [x] Write comprehensive regression and acceptance tests:
   - Add integration tests covering save-time linking + manual backfill + stats coherence across repeated runs
   - Add admin action tests for mapping CRUD, bulk operations, and permission/nonce enforcement
   - Add performance-oriented tests/fixtures for larger post and mapping counts
+  - Completed 2026-04-20: Expanded `tests/test-backfill-scanner.php` with acceptance-style save-time + backfill + rerun stats-coherence coverage across shared linker/scanner flows.
+  - Completed 2026-04-20: Added large-scale fixtures in `tests/fixtures/performance-fixtures.php` and high-volume scanner assertions (120 posts, 90 mappings) including bounded query-call checks.
+  - Completed 2026-04-20: Strengthened `tests/test-admin-page.php` with mixed bulk-delete coverage plus additional delete/reset capability and nonce enforcement assertions.
+  - Completed 2026-04-20: Re-ran `sh tests/run-tests.sh` successfully after regression suite updates.
 
 - [ ] Run full quality verification and remediate issues:
   - Execute lint/static analysis/tests and resolve all failures

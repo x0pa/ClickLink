@@ -1002,6 +1002,48 @@ $assert(
     'Expected bulk delete redirects to include both success notice and deleted-row count.'
 );
 
+$wpdb->insert(
+    'wp_clicklink_keyword_mappings',
+    array(
+        'keyword' => 'Mixed Bulk',
+        'url' => 'https://example.com/mixed-bulk',
+        'created_at' => '2026-04-20 00:00:00',
+        'updated_at' => '2026-04-20 02:00:00',
+    ),
+    array('%s', '%s', '%s', '%s')
+);
+$mixed_bulk_id = 0;
+
+foreach ($wpdb->rows as $row) {
+    if (($row['keyword'] ?? '') !== 'Mixed Bulk') {
+        continue;
+    }
+
+    $mixed_bulk_id = (int) ($row['id'] ?? 0);
+}
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_bulk_delete_mappings',
+    'bulk_action' => 'delete',
+    'mapping_ids' => array((string) $mixed_bulk_id, '999999'),
+    'clicklink_mappings_search' => 'Mixed',
+    'clicklink_mappings_page' => '1',
+    'clicklink_mappings_per_page' => '20',
+);
+$page->handle_bulk_delete_mappings();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    $mixed_bulk_id > 0 && ! isset($wpdb->rows[$mixed_bulk_id]),
+    'Expected bulk delete actions to remove valid selected rows even when unknown IDs are included.'
+);
+$assert(
+    is_string($latest_redirect)
+        && str_contains($latest_redirect, 'clicklink_notice=bulk_deleted')
+        && str_contains($latest_redirect, 'clicklink_deleted_count=1'),
+    'Expected mixed bulk delete requests to report only successfully deleted row counts.'
+);
+
 $_POST = array(
     '_wpnonce' => 'nonce-clicklink_bulk_delete_mappings',
     'bulk_action' => '',
@@ -1282,6 +1324,23 @@ $assert(
 
 $clicklink_test_can_manage = true;
 $_POST = array(
+    '_wpnonce' => 'bad-nonce',
+    'mapping_id' => (string) $mapping_id,
+);
+$rows_before_delete_nonce = count($wpdb->rows);
+$page->handle_delete_mapping();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    count($wpdb->rows) === $rows_before_delete_nonce && isset($wpdb->rows[$mapping_id]),
+    'Expected delete mapping action to reject malformed nonces without mutating rows.'
+);
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
+    'Expected delete mapping action to return invalid_nonce notices for malformed nonce payloads.'
+);
+
+$_POST = array(
     '_wpnonce' => 'nonce-clicklink_delete_mapping',
     'mapping_id' => (string) $mapping_id,
 );
@@ -1401,6 +1460,39 @@ try {
 $assert(
     $threw_for_bulk_delete_capability === true,
     'Expected bulk delete handler to deny access when capability checks fail.'
+);
+
+$threw_for_delete_capability = false;
+
+try {
+    $_POST = array(
+        '_wpnonce' => 'nonce-clicklink_delete_mapping',
+        'mapping_id' => '1',
+    );
+    $page->handle_delete_mapping();
+} catch (RuntimeException $exception) {
+    $threw_for_delete_capability = true;
+}
+
+$assert(
+    $threw_for_delete_capability === true,
+    'Expected delete mapping handler to deny access when capability checks fail.'
+);
+
+$threw_for_operational_reset_capability = false;
+
+try {
+    $_POST = array(
+        '_wpnonce' => 'nonce-clicklink_reset_operational_state',
+    );
+    $page->handle_reset_operational_state();
+} catch (RuntimeException $exception) {
+    $threw_for_operational_reset_capability = true;
+}
+
+$assert(
+    $threw_for_operational_reset_capability === true,
+    'Expected operational reset handler to deny access when capability checks fail.'
 );
 
 $_POST = array();
