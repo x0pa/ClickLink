@@ -22,10 +22,11 @@ This phase creates a fully runnable ClickLink plugin baseline that installs clea
   - Apply nonce validation, capability checks, URL sanitization, keyword normalization, and success/error admin notices
   - Completion note (2026-04-20, loop 00001): Replaced the admin placeholder with a dashboard submenu CRUD interface for keyword/url mappings backed by `clicklink_keyword_mappings`, including capability + nonce enforcement, normalized lowercase keywords, URL sanitization/validation, redirect-based success/error notices, and new deterministic `test-admin-page.php` coverage wired into `tests/run-tests.sh`.
 
-- [ ] Create the post-save auto-linking prototype engine:
+- [x] Create the post-save auto-linking prototype engine:
   - Hook into post save for blog posts only, skipping autosaves/revisions and unchanged content saves
   - Reuse helper patterns where possible, then implement a linker service that selects a random URL when a keyword has multiple rows
   - Process content body paragraphs only and skip headings, code/pre blocks, and existing anchors while enforcing the 5-links-per-post cap
+  - Completion note (2026-04-20, loop 00001): Added `Post_Save_Linker` with `save_post_post` registration, autosave/revision/non-post and unchanged-content hash skips, randomized duplicate-keyword URL selection, paragraph-scoped replacement that protects headings/code/pre/existing anchors, and enforced `max_links_per_post` limits with deterministic `test-post-save-linker.php` coverage.
 
 - [ ] Add baseline metrics capture and stats widget output:
   - Record per-save link insertion counts and cumulative totals needed for the admin widget

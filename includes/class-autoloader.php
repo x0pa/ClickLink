@@ -25,6 +25,7 @@ final class Autoloader
             'Compatibility' => CLICKLINK_PATH . 'includes/class-compatibility.php',
             'Lifecycle' => CLICKLINK_PATH . 'includes/class-lifecycle.php',
             'Installer' => CLICKLINK_PATH . 'includes/class-installer.php',
+            'Post_Save_Linker' => CLICKLINK_PATH . 'includes/class-post-save-linker.php',
             'Admin\\Admin_Page' => CLICKLINK_PATH . 'admin/class-admin-page.php',
         );
 

@@ -10,6 +10,7 @@ final class Plugin
 {
     private static ?self $instance = null;
     private ?Admin_Page $admin_page = null;
+    private ?Post_Save_Linker $post_save_linker = null;
 
     private function __construct()
     {
@@ -35,6 +36,9 @@ final class Plugin
         }
 
         Installer::maybe_upgrade();
+
+        $this->post_save_linker = new Post_Save_Linker();
+        $this->post_save_linker->register();
 
         if (function_exists('is_admin') && is_admin()) {
             $this->admin_page = new Admin_Page();
