@@ -60,7 +60,12 @@ This phase adds a manual “Run Now” scanner that processes older blog posts w
     - Added scanner integration regression coverage using `clicklink_fixture_exclusion_and_encoding_content()` to verify exclusion-zone safety (`script`, `style`, `textarea`, headings) and enforcement of `max_links_per_post` caps during backfill execution.
     - Expanded `tests/test-admin-page.php` endpoint coverage with scanner AJAX success/failure paths, malformed-request nonce omission handling, and capability-denial assertions for scanner actions alongside existing admin-post nonce checks.
 
-- [ ] Execute validation and confirm operator-ready workflow:
+- [x] Execute validation and confirm operator-ready workflow:
   - Run all automated tests and quality checks, fix regressions, and re-run to green
   - Perform end-to-end admin smoke test: seed mappings/posts, run backfill, verify progress and final counts
   - Confirm a second “Run Now” pass completes safely without creating invalid duplicate links
+  - Completion notes (2026-04-20, loop 00001):
+    - Ran the full automated suite with `./tests/run-tests.sh` and confirmed all checks passed (`compatibility`, `admin page`, `dashboard widget`, `installer`, `lifecycle`, `linker focused behaviors`, `post save linker`, `backfill scanner`, `prototype smoke`).
+    - Ran a repository-wide PHP syntax quality check with `for file in $(rg --files -g '*.php'); do php -l "$file"; done` and verified a clean lint pass.
+    - Confirmed end-to-end operator workflow coverage via `tests/test-admin-page.php`: seeded mappings/posts in the harness, executed `Run Now` and `Process Next Batch`, and validated progress/final counter visibility and completion notices.
+    - Confirmed rerun safety via `tests/test-backfill-scanner.php`: a second manual run completed with `changed_posts=0` and `inserted_links=0`, and global inserted-link totals remained unchanged (no invalid duplicate links).
