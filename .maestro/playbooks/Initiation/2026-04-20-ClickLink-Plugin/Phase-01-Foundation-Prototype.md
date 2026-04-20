@@ -10,10 +10,11 @@ This phase creates a fully runnable ClickLink plugin baseline that installs clea
   - Add plugin header metadata, constants, autoload/include wiring, activation/deactivation hooks, capability checks, and guardrails for latest stable WordPress/PHP compatibility (no multisite behavior)
   - Completion note (2026-04-20, loop 00001): No reusable plugin code existed in-repo, so a full foundation scaffold was added with bootstrap/autoloader/lifecycle/admin capability checks and multisite/environment guardrails, plus passing automated bootstrap tests.
 
-- [ ] Implement persistent storage and install migrations:
+- [x] Implement persistent storage and install migrations:
   - Create install/upgrade routines with `dbDelta` for a keyword mapping table that allows duplicate keywords with different URLs
   - Add indexes for keyword and timestamps, plus schema version tracking option for future migrations
   - Add plugin options with sane defaults (including `max_links_per_post = 5`) so Phase 01 is executable without prompts
+  - Completion note (2026-04-20, loop 00001): Added `Installer` migration/runtime upgrade flow with `dbDelta` schema creation for `clicklink_keyword_mappings` (non-unique keyword rows), indexes on keyword/created_at/updated_at, schema version tracking via `clicklink_schema_version`, and default `clicklink_options` initialization with `max_links_per_post = 5`, validated by new installer tests plus existing suite.
 
 - [ ] Build the admin mappings page for CRUD management:
   - Add an admin menu page under the dashboard for ClickLink settings

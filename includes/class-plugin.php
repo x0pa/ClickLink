@@ -34,6 +34,8 @@ final class Plugin
             return;
         }
 
+        Installer::maybe_upgrade();
+
         if (function_exists('is_admin') && is_admin()) {
             $this->admin_page = new Admin_Page();
             $this->admin_page->register();

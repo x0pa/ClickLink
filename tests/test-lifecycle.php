@@ -50,6 +50,7 @@ if (! function_exists('wp_die')) {
 }
 
 require_once __DIR__ . '/../includes/class-compatibility.php';
+require_once __DIR__ . '/../includes/class-installer.php';
 require_once __DIR__ . '/../includes/class-lifecycle.php';
 
 $failures = array();

@@ -11,6 +11,7 @@ final class Lifecycle
     public static function activate(): void
     {
         if (Compatibility::is_supported_environment()) {
+            Installer::activate();
             return;
         }
 
