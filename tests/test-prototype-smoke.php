@@ -825,12 +825,16 @@ $assert(
     'Expected dashboard widget smoke output to show saved mapping count.'
 );
 $assert(
-    str_contains($widget_output, '<th scope="row">Total links inserted</th><td>' . (string) $inserted_link_count . '</td>'),
-    'Expected dashboard widget smoke output to align cumulative inserted links with actual inserted link count.'
+    str_contains($widget_output, '<th scope="row">Total links created</th><td>' . (string) $inserted_link_count . '</td>'),
+    'Expected dashboard widget smoke output to align cumulative links-created totals with actual inserted link count.'
 );
 $assert(
-    str_contains($widget_output, '<th scope="row">Posts touched by linker</th><td>1</td>'),
-    'Expected dashboard widget smoke output to show posts touched by linker.'
+    str_contains($widget_output, '<th scope="row">Posts with links</th><td>1</td>'),
+    'Expected dashboard widget smoke output to show posts-with-links totals.'
+);
+$assert(
+    str_contains($widget_output, '<th scope="row">Average links per changed post</th><td>' . number_format((float) $inserted_link_count, 2, '.', ',') . '</td>'),
+    'Expected dashboard widget smoke output to show average links per changed post.'
 );
 
 if ($failures !== array()) {

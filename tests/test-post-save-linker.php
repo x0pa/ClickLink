@@ -301,6 +301,17 @@ $assert(
     (int) (($clicklink_test_options['clicklink_stats']['posts_touched'] ?? 0)) === 1,
     'Expected posts_touched metrics to track unique posts updated by the linker.'
 );
+$keyword_counts_after_first_save = $clicklink_test_options['clicklink_stats']['keyword_match_counts'] ?? array();
+$assert(
+    is_array($keyword_counts_after_first_save) && array_sum($keyword_counts_after_first_save) === 5,
+    'Expected per-keyword match counters to sum to inserted-link totals for each qualifying save.'
+);
+$assert(
+    is_array($keyword_counts_after_first_save)
+        && (int) ($keyword_counts_after_first_save['apple'] ?? 0) > 0
+        && (int) ($keyword_counts_after_first_save['banana'] ?? 0) > 0,
+    'Expected per-keyword match counters to track each matched keyword in linked paragraph content.'
+);
 $assert(
     (string) ($clicklink_test_post_meta[101]['_clicklink_links_inserted_last_save'] ?? '') === '5',
     'Expected per-save metadata to capture the number of links inserted on the latest qualifying save.'
@@ -385,6 +396,17 @@ $assert(
 $assert(
     (int) (($clicklink_test_options['clicklink_stats']['posts_touched'] ?? 0)) === 2,
     'Expected posts_touched to increment when a second post receives inserted links.'
+);
+$keyword_counts_after_second_save = $clicklink_test_options['clicklink_stats']['keyword_match_counts'] ?? array();
+$assert(
+    is_array($keyword_counts_after_second_save) && array_sum($keyword_counts_after_second_save) === 6,
+    'Expected per-keyword match counters to remain aligned with cumulative inserted-link totals after later saves.'
+);
+$assert(
+    is_array($keyword_counts_after_second_save)
+        && (int) ($keyword_counts_after_second_save['apple'] ?? 0)
+            === (int) ($keyword_counts_after_first_save['apple'] ?? 0) + 1,
+    'Expected later qualifying saves to increment the matching keyword counter without resetting prior counts.'
 );
 $assert(
     (string) ($clicklink_test_post_meta[505]['_clicklink_links_inserted_last_save'] ?? '') === '1',

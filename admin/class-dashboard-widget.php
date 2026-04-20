@@ -47,27 +47,88 @@ final class Dashboard_Widget
     public function render(): void
     {
         $totals = $this->stats->get_totals();
+        $total_links_created = max(0, (int) ($totals['total_links_inserted'] ?? 0));
+        $posts_with_links = max(0, (int) ($totals['posts_touched'] ?? 0));
+        $average_links_per_changed_post = $posts_with_links > 0
+            ? $total_links_created / $posts_with_links
+            : 0.0;
+
         $rows = array(
-            self::translate('Total blog posts') => $this->stats->total_blog_posts(),
-            self::translate('Total keyword/url rows') => $this->stats->total_mappings(),
-            self::translate('Total links inserted') => (int) ($totals['total_links_inserted'] ?? 0),
-            self::translate('Posts touched by linker') => (int) ($totals['posts_touched'] ?? 0),
+            array(
+                'label' => self::translate('Total blog posts'),
+                'value' => self::format_number($this->stats->total_blog_posts()),
+            ),
+            array(
+                'label' => self::translate('Total links created'),
+                'value' => self::format_number($total_links_created),
+            ),
+            array(
+                'label' => self::translate('Total keyword/url rows'),
+                'value' => self::format_number($this->stats->total_mappings()),
+            ),
+            array(
+                'label' => self::translate('Posts with links'),
+                'value' => self::format_number($posts_with_links),
+            ),
+            array(
+                'label' => self::translate('Links added by latest backfill run'),
+                'value' => self::format_number($this->stats->latest_backfill_links_added()),
+            ),
+            array(
+                'label' => self::translate('Average links per changed post'),
+                'value' => self::format_decimal($average_links_per_changed_post),
+            ),
         );
+        $top_keywords = $this->stats->top_matched_keywords(5);
 
         echo '<div class="clicklink-dashboard-widget">';
-        echo '<p>' . self::escape(self::translate('Baseline ClickLink activity metrics update after each qualifying post save.')) . '</p>';
+        echo '<p>' . self::escape(self::translate('Operator metrics update after each qualifying post save and each manual backfill batch.')) . '</p>';
         echo '<table class="widefat striped" role="presentation">';
         echo '<tbody>';
 
-        foreach ($rows as $label => $value) {
+        foreach ($rows as $row) {
+            $label = isset($row['label']) && is_string($row['label']) ? $row['label'] : '';
+            $value = isset($row['value']) && is_string($row['value']) ? $row['value'] : '0';
             echo '<tr>';
             echo '<th scope="row">' . self::escape($label) . '</th>';
-            echo '<td>' . self::escape(self::format_number((int) $value)) . '</td>';
+            echo '<td>' . self::escape($value) . '</td>';
             echo '</tr>';
         }
 
         echo '</tbody>';
         echo '</table>';
+
+        echo '<h4>' . self::escape(self::translate('Top matched keywords')) . '</h4>';
+        $rendered_keyword_count = 0;
+
+        if ($top_keywords !== array()) {
+            echo '<ol style="margin-left:1.25em;">';
+
+            foreach ($top_keywords as $entry) {
+                if (! is_array($entry)) {
+                    continue;
+                }
+
+                $keyword = isset($entry['keyword']) && is_string($entry['keyword'])
+                    ? trim($entry['keyword'])
+                    : '';
+                $matches = max(0, (int) ($entry['matches'] ?? 0));
+
+                if ($keyword === '' || $matches <= 0) {
+                    continue;
+                }
+
+                echo '<li><code>' . self::escape($keyword) . '</code>: ' . self::escape(self::format_number($matches)) . '</li>';
+                $rendered_keyword_count++;
+            }
+
+            echo '</ol>';
+        }
+
+        if ($rendered_keyword_count <= 0) {
+            echo '<p>' . self::escape(self::translate('No matched keywords yet.')) . '</p>';
+        }
+
         echo '</div>';
     }
 
@@ -83,6 +144,11 @@ final class Dashboard_Widget
         }
 
         return number_format($value);
+    }
+
+    private static function format_decimal(float $value): string
+    {
+        return number_format($value, 2, '.', ',');
     }
 
     private static function translate(string $value): string

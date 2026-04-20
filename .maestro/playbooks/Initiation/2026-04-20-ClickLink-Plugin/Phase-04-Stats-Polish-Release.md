@@ -12,10 +12,13 @@ This phase turns ClickLink into a polished, release-ready plugin by expanding ac
   - Completed 2026-04-20: Normalized `Admin_Page` hook registration through a shared action map registrar and removed duplicated nonce constants by reusing action constants.
   - Completed 2026-04-20: Tightened fallback error handling (`Backfill_Scanner` throwable message normalization, `Admin_Page` deny-access runtime exception fallback) while preserving single-site enforcement via compatibility gating.
 
-- [ ] Expand the statistics dashboard/widget into an operator-focused analytics view:
+- [x] Expand the statistics dashboard/widget into an operator-focused analytics view:
   - Preserve required headline metrics (total blog posts, total links created, total mapping rows)
   - Add additional useful stats (posts with links, links added by backfill run, average links per changed post, top matched keywords)
   - Ensure metrics are query-efficient and remain accurate after repeated save and backfill operations
+  - Completed 2026-04-20: Extended `Linker_Stats` and `Post_Save_Linker` to persist per-keyword match counters and expose operator-ready, query-efficient metrics from existing option/meta state.
+  - Completed 2026-04-20: Updated `Dashboard_Widget` to render required headline metrics plus posts-with-links, latest backfill-run link totals, average links per changed post, and a top-keyword leaderboard with empty-state messaging.
+  - Completed 2026-04-20: Added regression coverage in dashboard, linker, backfill scanner, and prototype smoke tests to verify metric coherence across repeated save/backfill runs.
 
 - [ ] Improve admin mappings UX for larger datasets:
   - Add search/filter/sort and pagination for keyword/url rows while preserving duplicate-keyword support

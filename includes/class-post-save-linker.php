@@ -68,7 +68,7 @@ final class Post_Save_Linker
 
     /**
      * @param mixed $post
-     * @return array{processed: bool, changed: bool, inserted_links: int}
+     * @return array{processed: bool, changed: bool, inserted_links: int, keyword_hits: array<string, int>}
      */
     public function process_post(int $post_id, $post, bool $update = true): array
     {
@@ -76,6 +76,7 @@ final class Post_Save_Linker
             'processed' => false,
             'changed' => false,
             'inserted_links' => 0,
+            'keyword_hits' => array(),
         );
 
         if ($post_id <= 0) {
@@ -132,6 +133,9 @@ final class Post_Save_Linker
         $link_result = $this->link_content($content, $mappings, $max_links_per_post);
         $linked_content = (string) ($link_result['content'] ?? $content);
         $links_inserted = (int) ($link_result['inserted_links'] ?? 0);
+        $keyword_hits = is_array($link_result['keyword_hits'] ?? null)
+            ? $link_result['keyword_hits']
+            : array();
 
         if ($links_inserted <= 0 || $linked_content === $content) {
             $this->persist_content_hash($post_id, $current_hash);
@@ -140,16 +144,18 @@ final class Post_Save_Linker
                 'processed' => true,
                 'changed' => false,
                 'inserted_links' => 0,
+                'keyword_hits' => array(),
             );
         }
 
         if ($this->update_post_content($post_id, $linked_content)) {
             $this->persist_content_hash($post_id, $this->content_hash($linked_content));
-            $this->stats->record_save_metrics($post_id, $links_inserted);
+            $this->stats->record_save_metrics($post_id, $links_inserted, $keyword_hits);
             return array(
                 'processed' => true,
                 'changed' => true,
                 'inserted_links' => max(0, $links_inserted),
+                'keyword_hits' => $keyword_hits,
             );
         }
 
@@ -160,6 +166,7 @@ final class Post_Save_Linker
             'processed' => true,
             'changed' => false,
             'inserted_links' => 0,
+            'keyword_hits' => array(),
         );
     }
 
@@ -267,7 +274,7 @@ final class Post_Save_Linker
 
     /**
      * @param array<string, array<int, string>> $mappings
-     * @return array{content: string, inserted_links: int}
+     * @return array{content: string, inserted_links: int, keyword_hits: array<string, int>}
      */
     private function link_content(string $content, array $mappings, int $max_links_per_post): array
     {
@@ -275,6 +282,7 @@ final class Post_Save_Linker
             return array(
                 'content' => $content,
                 'inserted_links' => 0,
+                'keyword_hits' => array(),
             );
         }
 
@@ -284,10 +292,12 @@ final class Post_Save_Linker
             return array(
                 'content' => $content,
                 'inserted_links' => 0,
+                'keyword_hits' => array(),
             );
         }
 
         $inserted_links = 0;
+        $keyword_hits = array();
         $linked_content = '';
         $offset = 0;
         $content_length = strlen($content);
@@ -324,6 +334,7 @@ final class Post_Save_Linker
                     $keyword_entries,
                     $max_links_per_post,
                     $inserted_links,
+                    $keyword_hits,
                     $paragraph_depth,
                     $excluded_depth
                 );
@@ -337,6 +348,7 @@ final class Post_Save_Linker
                     $keyword_entries,
                     $max_links_per_post,
                     $inserted_links,
+                    $keyword_hits,
                     $paragraph_depth,
                     $excluded_depth
                 );
@@ -396,6 +408,7 @@ final class Post_Save_Linker
         return array(
             'content' => $linked_content,
             'inserted_links' => $inserted_links,
+            'keyword_hits' => $keyword_hits,
         );
     }
 
@@ -407,6 +420,7 @@ final class Post_Save_Linker
         array $keyword_entries,
         int $max_links_per_post,
         int &$inserted_links,
+        array &$keyword_hits,
         int $paragraph_depth,
         int $excluded_depth
     ): string {
@@ -418,7 +432,8 @@ final class Post_Save_Linker
             $text_fragment,
             $keyword_entries,
             $max_links_per_post,
-            $inserted_links
+            $inserted_links,
+            $keyword_hits
         );
     }
 
@@ -554,7 +569,8 @@ final class Post_Save_Linker
         string $text,
         array $keyword_entries,
         int $max_links_per_post,
-        int &$inserted_links
+        int &$inserted_links,
+        array &$keyword_hits
     ): string {
         if ($text === '' || $inserted_links >= $max_links_per_post || $keyword_entries === array()) {
             return $text;
@@ -615,6 +631,18 @@ final class Post_Save_Linker
 
             $target_url = $this->pick_random_url($keyword_entry['urls']);
             $output .= '<a href="' . $this->escape_url_attr($target_url) . '">' . $capture_match . '</a>';
+
+            $matched_keyword = isset($keyword_entry['keyword']) && is_string($keyword_entry['keyword'])
+                ? $keyword_entry['keyword']
+                : '';
+
+            if ($matched_keyword !== '') {
+                if (! isset($keyword_hits[$matched_keyword])) {
+                    $keyword_hits[$matched_keyword] = 0;
+                }
+
+                $keyword_hits[$matched_keyword]++;
+            }
 
             $offset = $match_offset + strlen($full_match);
             $inserted_links++;

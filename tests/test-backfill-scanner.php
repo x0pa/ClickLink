@@ -501,6 +501,15 @@ $assert(
         && (int) ($global_stats['posts_touched'] ?? -1) === 2,
     'Expected backfill run to update shared global linker stats via Linker_Stats::record_save_metrics().'
 );
+$keyword_counts_after_first_backfill = is_array($global_stats)
+    ? ($global_stats['keyword_match_counts'] ?? array())
+    : array();
+$assert(
+    is_array($keyword_counts_after_first_backfill)
+        && array_sum($keyword_counts_after_first_backfill) === 3
+        && (int) ($keyword_counts_after_first_backfill['apple'] ?? 0) === 3,
+    'Expected backfill run stats to persist per-keyword match counters for operator keyword analytics.'
+);
 
 $scanner->start_run(2);
 $scanner->process_next_batch();
@@ -532,6 +541,12 @@ $assert(
     is_array($global_stats_after_rerun)
         && (int) ($global_stats_after_rerun['total_links_inserted'] ?? -1) === 3,
     'Expected idempotent rerun to leave global inserted-link totals unchanged.'
+);
+$assert(
+    is_array($global_stats_after_rerun)
+        && is_array($keyword_counts_after_first_backfill)
+        && ($global_stats_after_rerun['keyword_match_counts'] ?? array()) === $keyword_counts_after_first_backfill,
+    'Expected idempotent rerun to leave keyword match counters unchanged when no new links are inserted.'
 );
 
 $reset_environment();
@@ -565,6 +580,11 @@ $assert(
         && (int) ($global_stats_after_hashed_backfill['total_links_inserted'] ?? -1) === 3
         && (int) ($global_stats_after_hashed_backfill['posts_touched'] ?? -1) === 2,
     'Expected hashed-content backfill runs to keep updating shared global stats through Linker_Stats.'
+);
+$assert(
+    is_array($global_stats_after_hashed_backfill)
+        && (int) (($global_stats_after_hashed_backfill['keyword_match_counts']['apple'] ?? 0)) === 3,
+    'Expected hashed-content backfill runs to keep keyword match counters aligned with inserted-link totals.'
 );
 
 $reset_environment();

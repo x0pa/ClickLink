@@ -211,8 +211,14 @@ $widget->render();
 $empty_output = (string) ob_get_clean();
 
 $assert(
-    str_contains($empty_output, 'Total keyword/url rows') && str_contains($empty_output, '>0<'),
-    'Expected dashboard render to safely show zero values when no mappings or stats exist.'
+    str_contains($empty_output, 'Total keyword/url rows')
+        && str_contains($empty_output, 'Total links created')
+        && str_contains($empty_output, '>0<'),
+    'Expected dashboard render to safely show zero values for required headline metrics when no mappings or stats exist.'
+);
+$assert(
+    str_contains($empty_output, 'No matched keywords yet.'),
+    'Expected dashboard render to show an empty-state message for top keywords when no matches have been recorded.'
 );
 
 $clicklink_test_count_posts = (object) array(
@@ -221,8 +227,16 @@ $clicklink_test_count_posts = (object) array(
     'auto-draft' => 4,
 );
 $wpdb->mapping_count = 3;
-$stats->record_save_metrics(77, 4);
-$stats->record_save_metrics(77, 2);
+$stats->record_save_metrics(77, 4, array('apple' => 3, 'banana' => 1));
+$stats->record_save_metrics(77, 2, array('apple' => 2));
+update_option(
+    'clicklink_backfill_run_state',
+    array(
+        'status' => 'completed',
+        'inserted_links' => 5,
+    ),
+    false
+);
 
 $totals = $stats->get_totals();
 
@@ -233,6 +247,12 @@ $assert(
 $assert(
     (int) ($totals['posts_touched'] ?? 0) === 1,
     'Expected posts_touched to remain unique per post ID.'
+);
+$assert(
+    is_array($totals['keyword_match_counts'] ?? null)
+        && (int) (($totals['keyword_match_counts']['apple'] ?? 0)) === 5
+        && (int) (($totals['keyword_match_counts']['banana'] ?? 0)) === 1,
+    'Expected keyword match counts to accumulate for each inserted keyword across repeated saves.'
 );
 
 ob_start();
@@ -249,11 +269,23 @@ $assert(
 );
 $assert(
     str_contains($stats_output, '<td>6</td>'),
-    'Expected widget output to render updated cumulative inserted-link totals immediately.'
+    'Expected widget output to render updated cumulative links-created totals immediately.'
 );
 $assert(
     str_contains($stats_output, '<td>1</td>'),
-    'Expected widget output to render posts_touched totals from linker metrics.'
+    'Expected widget output to render posts-with-links totals from linker metrics.'
+);
+$assert(
+    str_contains($stats_output, '<td>5</td>'),
+    'Expected widget output to render latest backfill run link totals from scanner state metadata.'
+);
+$assert(
+    str_contains($stats_output, '<td>6.00</td>'),
+    'Expected widget output to render average links per changed post using decimal formatting.'
+);
+$assert(
+    str_contains($stats_output, '<code>apple</code>: 5') && str_contains($stats_output, '<code>banana</code>: 1'),
+    'Expected widget output to render top matched keyword leaderboard entries.'
 );
 
 $widget_count_before_denied = count($clicklink_test_dashboard_widgets);
