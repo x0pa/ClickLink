@@ -203,6 +203,7 @@ if (! function_exists('esc_url')) {
 global $wpdb;
 $wpdb = new ClickLink_Test_Linker_WPDB();
 
+require_once __DIR__ . '/fixtures/linker-content.php';
 require_once __DIR__ . '/../includes/class-installer.php';
 require_once __DIR__ . '/../includes/class-linker-stats.php';
 require_once __DIR__ . '/../includes/class-post-save-linker.php';
@@ -237,13 +238,7 @@ $wpdb->mappings = array(
 );
 
 $clicklink_test_rand_sequence = array(1, 0, 0, 0, 0);
-$source_content = <<<HTML
-<h2>Apple heading</h2>
-<p>Apple and banana in first paragraph.</p>
-<p>Existing <a href="https://external.example.com">apple</a> link, <code>banana</code> code, and apple text.</p>
-<pre>apple in pre block</pre>
-<p>banana banana banana banana banana banana</p>
-HTML;
+$source_content = clicklink_fixture_paragraph_scope_content();
 
 $post = (object) array(
     'ID' => 101,
@@ -269,6 +264,10 @@ $assert(
 $assert(
     str_contains($updated_content, '<h2>Apple heading</h2>'),
     'Expected headings outside paragraphs to be skipped.'
+);
+$assert(
+    str_contains($updated_content, '<div>apple in div block.</div>'),
+    'Expected non-paragraph block content to remain untouched.'
 );
 $assert(
     str_contains($updated_content, '<pre>apple in pre block</pre>'),

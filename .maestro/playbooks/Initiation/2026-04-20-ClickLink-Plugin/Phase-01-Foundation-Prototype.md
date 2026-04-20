@@ -34,10 +34,11 @@ This phase creates a fully runnable ClickLink plugin baseline that installs clea
   - Ensure stats update immediately after save operations and are safe if no mappings exist
   - Completion note (2026-04-20, loop 00001): Added `Linker_Stats` persistence for per-save insert counts and cumulative totals (including unique posts touched), wired `Post_Save_Linker` to record metrics on qualifying saves, and introduced a `Dashboard_Widget` panel with total posts/mappings/links/touched output plus deterministic `test-dashboard-widget.php` coverage; all lint checks and `tests/run-tests.sh` now pass with zero-mapping safe rendering.
 
-- [ ] Write Phase 01 automated validation coverage:
+- [x] Write Phase 01 automated validation coverage:
   - Add focused unit tests for keyword matching, random URL selection constraints, paragraph-only replacement behavior, and post-level link cap enforcement
   - Add install/migration tests for mapping table creation and default option initialization
   - Keep tests isolated and deterministic with reusable fixtures for sample post content
+  - Completion note (2026-04-20, loop 00001): Added reusable sample-content fixtures in `tests/fixtures/linker-content.php`, introduced focused linker coverage in `test-linker-focused.php` for boundary matching/random URL selection constraints/paragraph scoping/post-level cap behavior, and expanded installer validation to assert activation-path schema+default initialization; updated `tests/run-tests.sh` and confirmed full suite + syntax checks pass.
 
 - [ ] Run verification and produce a working prototype handoff state:
   - Execute lint/syntax and test commands (`php -l`, PHPUnit/WordPress test runner if configured) and fix failures

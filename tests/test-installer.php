@@ -65,6 +65,23 @@ $assert = static function (bool $condition, string $message) use (&$failures): v
     }
 };
 
+\ClickLink\Installer::activate();
+
+$assert(
+    count($clicklink_test_dbdelta_calls) === 1,
+    'Expected Installer::activate() to run schema creation on initial install.'
+);
+$assert(
+    ($clicklink_test_options['clicklink_schema_version'] ?? null) === 1,
+    'Expected Installer::activate() to persist schema version state.'
+);
+$assert(
+    ($clicklink_test_options['clicklink_options']['max_links_per_post'] ?? null) === 5,
+    'Expected Installer::activate() to initialize default plugin options.'
+);
+
+$clicklink_test_options = array();
+$clicklink_test_dbdelta_calls = array();
 \ClickLink\Installer::maybe_upgrade();
 
 $assert(
