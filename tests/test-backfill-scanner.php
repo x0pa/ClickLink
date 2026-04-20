@@ -324,6 +324,7 @@ require_once __DIR__ . '/../includes/class-keyword-mapping-repository.php';
 require_once __DIR__ . '/../includes/class-linker-stats.php';
 require_once __DIR__ . '/../includes/class-post-save-linker.php';
 require_once __DIR__ . '/../includes/class-backfill-scanner.php';
+require_once __DIR__ . '/fixtures/linker-content.php';
 
 $failures = array();
 
@@ -607,6 +608,83 @@ $assert(
 $assert(
     $reset_state['started_at'] === '' && $reset_state['completed_at'] === '',
     'Expected reset_run() to clear run timestamps before the next manual run.'
+);
+
+$reset_environment();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 2;
+$clicklink_test_posts = array(
+    10 => array(
+        'post_type' => 'post',
+        'post_status' => 'publish',
+        'post_content' => clicklink_fixture_exclusion_and_encoding_content(),
+    ),
+);
+$wpdb->mappings = array(
+    array(
+        'keyword' => 'alpha',
+        'url' => 'https://example.com/alpha',
+    ),
+);
+$scanner = new \ClickLink\Backfill_Scanner();
+$scanner->start_run(10);
+$exclusion_cap_state = $scanner->process_next_batch();
+$updated_exclusion_content = (string) ($clicklink_test_posts[10]['post_content'] ?? '');
+$exclusion_cap_link_count = preg_match_all(
+    '/href="https:\/\/example\.com\/alpha"/',
+    $updated_exclusion_content,
+    $exclusion_cap_matches
+);
+
+$assert(
+    $exclusion_cap_state['status'] === 'completed'
+        && $exclusion_cap_state['processed_posts'] === 1
+        && $exclusion_cap_state['changed_posts'] === 1,
+    'Expected scanner integration run to complete and record per-post progress metadata for exclusion/cap fixture content.'
+);
+$assert(
+    $exclusion_cap_state['inserted_links'] === 2 && $exclusion_cap_link_count === 2,
+    'Expected scanner integration run to respect max_links_per_post cap while using shared paragraph linker pipeline.'
+);
+$assert(
+    str_contains($updated_exclusion_content, '<script>var sample = "<p>alpha</p>";</script>')
+        && str_contains($updated_exclusion_content, '<style>.alpha{display:block;}</style>')
+        && str_contains($updated_exclusion_content, '<textarea>alpha hidden</textarea>')
+        && str_contains($updated_exclusion_content, '<h3>alpha heading</h3>'),
+    'Expected scanner integration run to preserve excluded contexts (script/style/textarea/headings) while linking paragraph text.'
+);
+
+$reset_environment();
+$clicklink_test_posts = array(
+    31 => array(
+        'post_type' => 'page',
+        'post_status' => 'publish',
+        'post_content' => '<p>apple page content should be ignored.</p>',
+    ),
+    32 => array(
+        'post_type' => 'post',
+        'post_status' => 'draft',
+        'post_content' => '<p>apple draft content should be ignored.</p>',
+    ),
+);
+$scanner = new \ClickLink\Backfill_Scanner();
+$no_op_start_state = $scanner->start_run(4);
+$no_op_state = $scanner->process_next_batch();
+
+$assert(
+    $no_op_start_state['total_eligible_posts'] === 0,
+    'Expected no-op run initialization to snapshot zero eligible published blog posts.'
+);
+$assert(
+    $no_op_state['status'] === 'completed'
+        && $no_op_state['processed_posts'] === 0
+        && $no_op_state['changed_posts'] === 0
+        && $no_op_state['inserted_links'] === 0
+        && $no_op_state['failures'] === 0,
+    'Expected no-op run processing to complete without touching counters when no published blog posts are eligible.'
+);
+$assert(
+    $no_op_state['completed_at'] === '2026-04-20 15:00:00',
+    'Expected no-op runs to persist completed_at metadata for operator visibility.'
 );
 
 if ($failures !== array()) {

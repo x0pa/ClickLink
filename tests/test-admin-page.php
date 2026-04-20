@@ -183,6 +183,7 @@ final class ClickLink_Test_Admin_WPDB
 $clicklink_test_actions = array();
 $clicklink_test_submenus = array();
 $clicklink_test_redirects = array();
+$clicklink_test_json_responses = array();
 $clicklink_test_can_manage = true;
 $clicklink_test_options = array();
 
@@ -376,6 +377,21 @@ if (! function_exists('wp_safe_redirect')) {
         global $clicklink_test_redirects;
 
         $clicklink_test_redirects[] = $location;
+    }
+}
+
+if (! function_exists('wp_send_json')) {
+    /**
+     * @param mixed $response
+     */
+    function wp_send_json($response, int $status_code = 200): void
+    {
+        global $clicklink_test_json_responses;
+
+        $clicklink_test_json_responses[] = array(
+            'status_code' => $status_code,
+            'payload' => $response,
+        );
     }
 }
 
@@ -663,6 +679,23 @@ $assert(
 );
 
 $_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_start',
+    'batch_size' => 'not-a-number',
+);
+$page->handle_start_scan();
+$latest_redirect = end($clicklink_test_redirects);
+$malformed_batch_state = get_option('clicklink_backfill_run_state', array());
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=scan_already_running'),
+    'Expected malformed start request payloads during active runs to fail safely without fatal errors.'
+);
+$assert(
+    is_array($malformed_batch_state) && (int) ($malformed_batch_state['batch_size'] ?? 0) >= 1,
+    'Expected malformed batch_size payloads to preserve an existing valid scanner batch size.'
+);
+
+$_POST = array(
     '_wpnonce' => 'bad-nonce',
 );
 $page->handle_next_batch();
@@ -717,6 +750,83 @@ $assert(
     'Expected next-batch action to require an active running scan.'
 );
 
+$clicklink_test_can_manage = true;
+$clicklink_test_json_responses = array();
+$wpdb->eligible_posts_count = 2;
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_start',
+);
+$page->handle_start_scan_ajax();
+$ajax_start = end($clicklink_test_json_responses);
+
+$assert(
+    is_array($ajax_start)
+        && (int) ($ajax_start['status_code'] ?? 0) === 200
+        && (($ajax_start['payload']['success'] ?? false) === true)
+        && (($ajax_start['payload']['notice'] ?? '') === 'scan_started'),
+    'Expected start AJAX endpoint to return a successful JSON payload for valid requests.'
+);
+
+$clicklink_test_json_responses = array();
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_next_batch',
+);
+$page->handle_next_batch_ajax();
+$ajax_next = end($clicklink_test_json_responses);
+
+$assert(
+    is_array($ajax_next)
+        && (int) ($ajax_next['status_code'] ?? 0) === 200
+        && (($ajax_next['payload']['success'] ?? false) === true)
+        && (($ajax_next['payload']['notice'] ?? '') === 'scan_completed'),
+    'Expected next-batch AJAX endpoint to return completion payloads when scanner batches finish.'
+);
+
+$clicklink_test_json_responses = array();
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_reset',
+);
+$page->handle_reset_scan_ajax();
+$ajax_reset = end($clicklink_test_json_responses);
+
+$assert(
+    is_array($ajax_reset)
+        && (int) ($ajax_reset['status_code'] ?? 0) === 200
+        && (($ajax_reset['payload']['success'] ?? false) === true)
+        && (($ajax_reset['payload']['notice'] ?? '') === 'scan_reset'),
+    'Expected reset AJAX endpoint to return successful JSON payloads when scanner reset succeeds.'
+);
+
+$clicklink_test_json_responses = array();
+$_POST = array();
+$page->handle_start_scan_ajax();
+$ajax_invalid_nonce = end($clicklink_test_json_responses);
+
+$assert(
+    is_array($ajax_invalid_nonce)
+        && (int) ($ajax_invalid_nonce['status_code'] ?? 0) === 403
+        && (($ajax_invalid_nonce['payload']['success'] ?? true) === false)
+        && (($ajax_invalid_nonce['payload']['notice'] ?? '') === 'invalid_nonce'),
+    'Expected scanner AJAX endpoints to reject malformed requests that omit nonce payloads.'
+);
+
+$clicklink_test_can_manage = false;
+$clicklink_test_json_responses = array();
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_start',
+);
+$page->handle_start_scan_ajax();
+$ajax_forbidden = end($clicklink_test_json_responses);
+
+$assert(
+    is_array($ajax_forbidden)
+        && (int) ($ajax_forbidden['status_code'] ?? 0) === 403
+        && (($ajax_forbidden['payload']['success'] ?? true) === false)
+        && (($ajax_forbidden['payload']['notice'] ?? '') === 'forbidden'),
+    'Expected scanner AJAX endpoints to reject invalid-permission requests with explicit forbidden responses.'
+);
+
+$clicklink_test_can_manage = true;
 $_POST = array(
     '_wpnonce' => 'nonce-clicklink_delete_mapping',
     'mapping_id' => (string) $mapping_id,
@@ -766,6 +876,22 @@ try {
 $assert(
     $threw_for_capability === true,
     'Expected save handler to deny access when capability checks fail.'
+);
+
+$threw_for_start_scan_capability = false;
+
+try {
+    $_POST = array(
+        '_wpnonce' => 'nonce-clicklink_backfill_start',
+    );
+    $page->handle_start_scan();
+} catch (RuntimeException $exception) {
+    $threw_for_start_scan_capability = true;
+}
+
+$assert(
+    $threw_for_start_scan_capability === true,
+    'Expected start scan handler to deny access when capability checks fail.'
 );
 
 $_POST = array();

@@ -51,10 +51,14 @@ This phase adds a manual “Run Now” scanner that processes older blog posts w
     - Wired plugin bootstrap to inject the same `Post_Save_Linker` instance into `Backfill_Scanner` (`Plugin::run()` -> `Admin_Page`) so save and backfill flows share one linker/statistics orchestration service.
     - Added regression coverage in `tests/test-backfill-scanner.php` for hashed-content backfill processing and verified global stats correctness; extended `tests/test-prototype-smoke.php` to assert plugin-level manual backfill handler registration.
 
-- [ ] Create automated tests for scan workflow and endpoints:
+- [x] Create automated tests for scan workflow and endpoints:
   - Add tests for batch cursor progression, completion state, cancellation/reset, and no-op runs
   - Add integration tests that confirm scanner respects exclusion zones and link caps
   - Add failure-path tests for invalid permissions/nonces and malformed requests
+  - Completion notes (2026-04-20, loop 00001):
+    - Extended `tests/test-backfill-scanner.php` with scanner no-op run coverage (zero eligible published posts) and explicit completion metadata assertions so batch workflow behavior is validated even when nothing can be processed.
+    - Added scanner integration regression coverage using `clicklink_fixture_exclusion_and_encoding_content()` to verify exclusion-zone safety (`script`, `style`, `textarea`, headings) and enforcement of `max_links_per_post` caps during backfill execution.
+    - Expanded `tests/test-admin-page.php` endpoint coverage with scanner AJAX success/failure paths, malformed-request nonce omission handling, and capability-denial assertions for scanner actions alongside existing admin-post nonce checks.
 
 - [ ] Execute validation and confirm operator-ready workflow:
   - Run all automated tests and quality checks, fix regressions, and re-run to green
