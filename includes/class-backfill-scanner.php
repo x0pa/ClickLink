@@ -12,6 +12,9 @@ final class Backfill_Scanner
     private const STATUS_COMPLETED = 'completed';
     private const STATUS_ERROR = 'error';
     private const DEFAULT_BATCH_SIZE = 20;
+    private const MAX_BATCH_SIZE = 100;
+    private const TIMEOUT_BATCH_BUFFER_SECONDS = 5;
+    private const ESTIMATED_SECONDS_PER_POST = 2;
 
     private Post_Save_Linker $post_save_linker;
 
@@ -59,8 +62,7 @@ final class Backfill_Scanner
         $normalized_state['inserted_links'] = self::non_negative_int($raw_state['inserted_links'] ?? $defaults['inserted_links']);
         $normalized_state['failures'] = self::non_negative_int($raw_state['failures'] ?? $defaults['failures']);
         $normalized_state['last_error'] = self::scalar_string($raw_state['last_error'] ?? $defaults['last_error']);
-        $normalized_state['batch_size'] = max(
-            1,
+        $normalized_state['batch_size'] = self::clamp_batch_size(
             self::non_negative_int($raw_state['batch_size'] ?? $defaults['batch_size'])
         );
         $normalized_state['total_eligible_posts'] = self::non_negative_int(
@@ -90,9 +92,33 @@ final class Backfill_Scanner
      *   total_eligible_posts: int
      * }
      */
+    public function reset_run(): array
+    {
+        $state = self::default_state();
+        $state['total_eligible_posts'] = $this->count_eligible_posts();
+        $this->persist_state($state);
+
+        return $state;
+    }
+
+    /**
+     * @return array{
+     *   status: string,
+     *   started_at: string,
+     *   completed_at: string,
+     *   cursor_post_id: int,
+     *   processed_posts: int,
+     *   changed_posts: int,
+     *   inserted_links: int,
+     *   failures: int,
+     *   last_error: string,
+     *   batch_size: int,
+     *   total_eligible_posts: int
+     * }
+     */
     public function start_run(?int $batch_size = null): array
     {
-        $resolved_batch_size = max(1, (int) ($batch_size ?? self::DEFAULT_BATCH_SIZE));
+        $resolved_batch_size = $this->resolve_batch_size($batch_size);
         $state = self::default_state();
         $state['batch_size'] = $resolved_batch_size;
         $state['total_eligible_posts'] = $this->count_eligible_posts();
@@ -132,6 +158,8 @@ final class Backfill_Scanner
             if ($state['started_at'] === '') {
                 $state['started_at'] = $this->current_timestamp();
             }
+
+            $this->persist_state($state);
         }
 
         if ($state['status'] !== self::STATUS_RUNNING) {
@@ -157,6 +185,7 @@ final class Backfill_Scanner
             if (! is_object($post)) {
                 $state['failures']++;
                 $state['last_error'] = 'Unable to load post ID ' . $post_id . ' for backfill processing.';
+                $this->persist_state($state);
                 continue;
             }
 
@@ -165,6 +194,7 @@ final class Backfill_Scanner
             } catch (\Throwable $throwable) {
                 $state['failures']++;
                 $state['last_error'] = $throwable->getMessage();
+                $this->persist_state($state);
                 continue;
             }
 
@@ -175,9 +205,16 @@ final class Backfill_Scanner
             }
 
             $state['inserted_links'] += max(0, (int) ($link_result['inserted_links'] ?? 0));
+            $this->persist_state($state);
         }
 
-        if (! $this->has_remaining_posts((int) $state['cursor_post_id'])) {
+        $has_remaining_posts = $this->has_remaining_posts((int) $state['cursor_post_id']);
+
+        if ($has_remaining_posts === null) {
+            return $this->transition_to_error($state, 'Unable to determine remaining blog posts for backfill.');
+        }
+
+        if (! $has_remaining_posts) {
             $state['status'] = self::STATUS_COMPLETED;
             $state['completed_at'] = $this->current_timestamp();
         }
@@ -322,6 +359,39 @@ final class Backfill_Scanner
         update_option(self::STATE_OPTION_KEY, $state, false);
     }
 
+    private function resolve_batch_size(?int $batch_size): int
+    {
+        $requested_batch_size = self::non_negative_int($batch_size ?? self::DEFAULT_BATCH_SIZE);
+        $sanitized_batch_size = self::clamp_batch_size($requested_batch_size);
+        $timeout_batch_limit = $this->timeout_batch_limit();
+
+        return min($sanitized_batch_size, $timeout_batch_limit);
+    }
+
+    private function timeout_batch_limit(): int
+    {
+        $default_limit = self::MAX_BATCH_SIZE;
+
+        if (! function_exists('ini_get')) {
+            return $default_limit;
+        }
+
+        $max_execution_time = self::non_negative_ini_int(ini_get('max_execution_time'));
+
+        if ($max_execution_time <= 0) {
+            return $default_limit;
+        }
+
+        $budget_seconds = max(1, $max_execution_time - self::TIMEOUT_BATCH_BUFFER_SECONDS);
+        $calculated_limit = intdiv($budget_seconds, self::ESTIMATED_SECONDS_PER_POST);
+
+        if ($calculated_limit <= 0) {
+            return 1;
+        }
+
+        return self::clamp_batch_size($calculated_limit);
+    }
+
     private function count_eligible_posts(): int
     {
         global $wpdb;
@@ -376,12 +446,15 @@ final class Backfill_Scanner
         return $post_ids;
     }
 
-    private function has_remaining_posts(int $cursor_post_id): bool
+    /**
+     * @return bool|null
+     */
+    private function has_remaining_posts(int $cursor_post_id): ?bool
     {
         $next_post_ids = $this->fetch_batch_post_ids($cursor_post_id, 1);
 
-        if (! is_array($next_post_ids)) {
-            return false;
+        if ($next_post_ids === null) {
+            return null;
         }
 
         return $next_post_ids !== array();
@@ -441,6 +514,37 @@ final class Backfill_Scanner
         }
 
         return (int) $validated;
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private static function non_negative_ini_int($value): int
+    {
+        if (! is_scalar($value) || $value === '') {
+            return 0;
+        }
+
+        $validated = filter_var(
+            (string) $value,
+            FILTER_VALIDATE_INT,
+            array(
+                'options' => array(
+                    'min_range' => 0,
+                ),
+            )
+        );
+
+        if ($validated === false) {
+            return 0;
+        }
+
+        return (int) $validated;
+    }
+
+    private static function clamp_batch_size(int $batch_size): int
+    {
+        return max(1, min(self::MAX_BATCH_SIZE, $batch_size));
     }
 
     private static function normalize_status(string $status): string

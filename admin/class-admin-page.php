@@ -15,9 +15,13 @@ final class Admin_Page
     private const SAVE_ACTION = 'clicklink_save_mapping';
     private const DELETE_ACTION = 'clicklink_delete_mapping';
     private const START_SCAN_ACTION = 'clicklink_backfill_start';
+    private const NEXT_BATCH_ACTION = 'clicklink_backfill_next_batch';
+    private const RESET_SCAN_ACTION = 'clicklink_backfill_reset';
     private const SAVE_NONCE_ACTION = 'clicklink_save_mapping';
     private const DELETE_NONCE_ACTION = 'clicklink_delete_mapping';
     private const START_SCAN_NONCE_ACTION = 'clicklink_backfill_start';
+    private const NEXT_BATCH_NONCE_ACTION = 'clicklink_backfill_next_batch';
+    private const RESET_SCAN_NONCE_ACTION = 'clicklink_backfill_reset';
     private const NOTICE_QUERY_KEY = 'clicklink_notice';
     private Keyword_Mapping_Repository $mapping_repository;
     private ?Backfill_Scanner $backfill_scanner;
@@ -40,6 +44,11 @@ final class Admin_Page
         add_action('admin_post_' . self::SAVE_ACTION, array($this, 'handle_save_mapping'));
         add_action('admin_post_' . self::DELETE_ACTION, array($this, 'handle_delete_mapping'));
         add_action('admin_post_' . self::START_SCAN_ACTION, array($this, 'handle_start_scan'));
+        add_action('admin_post_' . self::NEXT_BATCH_ACTION, array($this, 'handle_next_batch'));
+        add_action('admin_post_' . self::RESET_SCAN_ACTION, array($this, 'handle_reset_scan'));
+        add_action('wp_ajax_' . self::START_SCAN_ACTION, array($this, 'handle_start_scan_ajax'));
+        add_action('wp_ajax_' . self::NEXT_BATCH_ACTION, array($this, 'handle_next_batch_ajax'));
+        add_action('wp_ajax_' . self::RESET_SCAN_ACTION, array($this, 'handle_reset_scan_ajax'));
     }
 
     public function register_menu(): void
@@ -169,27 +178,179 @@ final class Admin_Page
             return;
         }
 
+        $this->redirect_with_notice($this->start_scan_notice_code());
+    }
+
+    public function handle_next_batch(): void
+    {
+        if (! self::can_manage()) {
+            $this->deny_access();
+            return;
+        }
+
+        if (! $this->verify_nonce(self::NEXT_BATCH_NONCE_ACTION)) {
+            $this->redirect_with_notice('invalid_nonce');
+            return;
+        }
+
+        $this->redirect_with_notice($this->next_batch_notice_code());
+    }
+
+    public function handle_reset_scan(): void
+    {
+        if (! self::can_manage()) {
+            $this->deny_access();
+            return;
+        }
+
+        if (! $this->verify_nonce(self::RESET_SCAN_NONCE_ACTION)) {
+            $this->redirect_with_notice('invalid_nonce');
+            return;
+        }
+
+        $this->redirect_with_notice($this->reset_scan_notice_code());
+    }
+
+    public function handle_start_scan_ajax(): void
+    {
+        $this->handle_scan_ajax_request(
+            self::START_SCAN_NONCE_ACTION,
+            static fn (self $page): string => $page->start_scan_notice_code()
+        );
+    }
+
+    public function handle_next_batch_ajax(): void
+    {
+        $this->handle_scan_ajax_request(
+            self::NEXT_BATCH_NONCE_ACTION,
+            static fn (self $page): string => $page->next_batch_notice_code()
+        );
+    }
+
+    public function handle_reset_scan_ajax(): void
+    {
+        $this->handle_scan_ajax_request(
+            self::RESET_SCAN_NONCE_ACTION,
+            static fn (self $page): string => $page->reset_scan_notice_code()
+        );
+    }
+
+    private function start_scan_notice_code(): string
+    {
         $scanner = $this->backfill_scanner();
         $state = $scanner->get_state();
 
         if (($state['status'] ?? '') === 'running') {
-            $this->redirect_with_notice('scan_already_running');
-            return;
+            return 'scan_already_running';
         }
 
         if ($scanner->current_eligible_posts() <= 0) {
-            $this->redirect_with_notice('scan_no_posts');
-            return;
+            return 'scan_no_posts';
         }
 
-        $started_state = $scanner->start_run();
+        $requested_batch_size = self::positive_int(self::request_post('batch_size'));
+        $started_state = $scanner->start_run($requested_batch_size > 0 ? $requested_batch_size : null);
 
         if (($started_state['status'] ?? '') === 'running') {
-            $this->redirect_with_notice('scan_started');
+            return 'scan_started';
+        }
+
+        return 'scan_start_failed';
+    }
+
+    private function next_batch_notice_code(): string
+    {
+        $scanner = $this->backfill_scanner();
+        $state = $scanner->get_state();
+        $status = self::scalar_string($state['status'] ?? '');
+
+        if ($status === 'completed') {
+            return 'scan_completed';
+        }
+
+        if ($status === 'error') {
+            return 'scan_error';
+        }
+
+        if ($status !== 'running') {
+            return 'scan_not_running';
+        }
+
+        $processed_state = $scanner->process_next_batch();
+        $processed_status = self::scalar_string($processed_state['status'] ?? '');
+
+        if ($processed_status === 'running') {
+            return 'scan_batch_processed';
+        }
+
+        if ($processed_status === 'completed') {
+            return 'scan_completed';
+        }
+
+        if ($processed_status === 'error') {
+            return 'scan_error';
+        }
+
+        return 'scan_next_failed';
+    }
+
+    private function reset_scan_notice_code(): string
+    {
+        $scanner = $this->backfill_scanner();
+        $state = $scanner->reset_run();
+
+        if (($state['status'] ?? '') === 'pending') {
+            return 'scan_reset';
+        }
+
+        return 'scan_reset_failed';
+    }
+
+    /**
+     * @param callable(self): string $operation
+     */
+    private function handle_scan_ajax_request(string $nonce_action, callable $operation): void
+    {
+        if (! self::can_manage()) {
+            $this->send_ajax_notice_response('forbidden', false, 403);
             return;
         }
 
-        $this->redirect_with_notice('scan_start_failed');
+        if (! $this->verify_nonce($nonce_action)) {
+            $this->send_ajax_notice_response('invalid_nonce', false, 403);
+            return;
+        }
+
+        $notice_code = $operation($this);
+        $success = in_array(
+            $notice_code,
+            array('scan_started', 'scan_batch_processed', 'scan_completed', 'scan_reset', 'scan_already_running', 'scan_no_posts'),
+            true
+        );
+
+        $status_code = $success ? 200 : 400;
+        $this->send_ajax_notice_response($notice_code, $success, $status_code);
+    }
+
+    private function send_ajax_notice_response(string $notice_code, bool $success, int $status_code): void
+    {
+        $scanner_state = $this->backfill_scanner()->get_state();
+        $response = array(
+            'success' => $success,
+            'notice' => $notice_code,
+            'state' => $scanner_state,
+        );
+
+        if (function_exists('wp_send_json')) {
+            wp_send_json($response, $status_code);
+            return;
+        }
+
+        if (! headers_sent()) {
+            header('Content-Type: application/json; charset=utf-8', true, $status_code);
+        }
+
+        echo (string) json_encode($response);
     }
 
     private function render_backfill_scanner_panel(): void
@@ -200,10 +361,12 @@ final class Admin_Page
         $processed_posts = self::non_negative_int($state['processed_posts'] ?? 0);
         $changed_posts = self::non_negative_int($state['changed_posts'] ?? 0);
         $inserted_links = self::non_negative_int($state['inserted_links'] ?? 0);
+        $batch_size = max(1, self::non_negative_int($state['batch_size'] ?? 0));
         $state_total_eligible_posts = self::non_negative_int($state['total_eligible_posts'] ?? 0);
         $current_eligible_posts = max(0, $scanner->current_eligible_posts());
         $started_at = self::scalar_string($state['started_at'] ?? '');
         $completed_at = self::scalar_string($state['completed_at'] ?? '');
+        $last_error = self::scalar_string($state['last_error'] ?? '');
 
         $display_total_eligible_posts = $state_total_eligible_posts;
 
@@ -213,8 +376,12 @@ final class Admin_Page
 
         $remaining_posts = max(0, $display_total_eligible_posts - $processed_posts);
         $scan_in_progress = $status === 'running';
+        $scan_ready_for_batches = $status === 'running';
         $can_start_scan = ! $scan_in_progress && $current_eligible_posts > 0;
+        $can_reset_scan = $status !== 'pending';
         $start_button_disabled_attr = $can_start_scan ? '' : ' disabled';
+        $next_batch_button_disabled_attr = $scan_ready_for_batches ? '' : ' disabled';
+        $reset_button_disabled_attr = $can_reset_scan ? '' : ' disabled';
 
         echo '<hr />';
         echo '<h2>' . self::escape(self::translate('Manual Backfill Scanner')) . '</h2>';
@@ -224,10 +391,12 @@ final class Admin_Page
         echo '<tr><th scope="row">' . self::escape(self::translate('Current status')) . '</th><td>' . self::escape($this->status_label($status)) . '</td></tr>';
         echo '<tr><th scope="row">' . self::escape(self::translate('Run started')) . '</th><td>' . self::escape($this->display_timestamp($started_at)) . '</td></tr>';
         echo '<tr><th scope="row">' . self::escape(self::translate('Run completed')) . '</th><td>' . self::escape($this->display_timestamp($completed_at)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Batch size')) . '</th><td>' . self::escape(self::format_number($batch_size)) . '</td></tr>';
         echo '<tr><th scope="row">' . self::escape(self::translate('Scanned posts')) . '</th><td>' . self::escape(self::format_number($processed_posts)) . '</td></tr>';
         echo '<tr><th scope="row">' . self::escape(self::translate('Changed posts')) . '</th><td>' . self::escape(self::format_number($changed_posts)) . '</td></tr>';
         echo '<tr><th scope="row">' . self::escape(self::translate('Inserted links')) . '</th><td>' . self::escape(self::format_number($inserted_links)) . '</td></tr>';
         echo '<tr><th scope="row">' . self::escape(self::translate('Remaining posts')) . '</th><td>' . self::escape(self::format_number($remaining_posts)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Last error')) . '</th><td>' . self::escape($last_error === '' ? self::translate('None') : $last_error) . '</td></tr>';
         echo '</tbody>';
         echo '</table>';
 
@@ -240,6 +409,22 @@ final class Admin_Page
         echo self::nonce_field(self::START_SCAN_NONCE_ACTION);
         echo '<p class="submit"><button type="submit" class="button button-primary"' . $start_button_disabled_attr . '>';
         echo self::escape(self::translate('Run Now'));
+        echo '</button></p>';
+        echo '</form>';
+
+        echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
+        echo '<input type="hidden" name="action" value="' . self::escape_attr(self::NEXT_BATCH_ACTION) . '">';
+        echo self::nonce_field(self::NEXT_BATCH_NONCE_ACTION);
+        echo '<p class="submit"><button type="submit" class="button button-secondary"' . $next_batch_button_disabled_attr . '>';
+        echo self::escape(self::translate('Process Next Batch'));
+        echo '</button></p>';
+        echo '</form>';
+
+        echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
+        echo '<input type="hidden" name="action" value="' . self::escape_attr(self::RESET_SCAN_ACTION) . '">';
+        echo self::nonce_field(self::RESET_SCAN_NONCE_ACTION);
+        echo '<p class="submit"><button type="submit" class="button button-secondary"' . $reset_button_disabled_attr . '>';
+        echo self::escape(self::translate('Cancel / Reset Run'));
         echo '</button></p>';
         echo '</form>';
     }
@@ -351,9 +536,16 @@ final class Admin_Page
             'updated' => array('class' => 'notice-success', 'message' => self::translate('Mapping updated.')),
             'deleted' => array('class' => 'notice-success', 'message' => self::translate('Mapping deleted.')),
             'scan_started' => array('class' => 'notice-success', 'message' => self::translate('Manual backfill run initialized.')),
+            'scan_batch_processed' => array('class' => 'notice-success', 'message' => self::translate('Processed one backfill batch. Continue until completion.')),
+            'scan_completed' => array('class' => 'notice-success', 'message' => self::translate('Manual backfill run completed.')),
+            'scan_reset' => array('class' => 'notice-success', 'message' => self::translate('Manual backfill run has been reset to pending state.')),
             'scan_already_running' => array('class' => 'notice-warning', 'message' => self::translate('A manual backfill run is already in progress.')),
+            'scan_not_running' => array('class' => 'notice-warning', 'message' => self::translate('Start a run before processing the next batch.')),
             'scan_no_posts' => array('class' => 'notice-info', 'message' => self::translate('No published blog posts are currently eligible for backfill.')),
+            'scan_error' => array('class' => 'notice-error', 'message' => self::translate('Backfill run is in an error state. Reset the run before retrying.')),
             'scan_start_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to start manual backfill run. Please try again.')),
+            'scan_next_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to process the next batch. Please review scanner status and retry.')),
+            'scan_reset_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to reset manual backfill state. Please try again.')),
             'invalid_input' => array('class' => 'notice-error', 'message' => self::translate('Keyword and a valid URL are required.')),
             'invalid_nonce' => array('class' => 'notice-error', 'message' => self::translate('Security check failed. Please try again.')),
             'not_found' => array('class' => 'notice-error', 'message' => self::translate('The selected mapping no longer exists.')),

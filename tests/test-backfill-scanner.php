@@ -414,6 +414,14 @@ $assert(
     'Expected start_run() to persist the configured fixed batch size.'
 );
 
+$oversized_batch_state = $scanner->start_run(999);
+$assert(
+    $oversized_batch_state['batch_size'] >= 1 && $oversized_batch_state['batch_size'] <= 100,
+    'Expected start_run() to cap oversized batch sizes to a timeout-safe upper bound.'
+);
+
+$scanner->start_run(2);
+
 $first_batch_state = $scanner->process_next_batch();
 
 $assert(
@@ -549,6 +557,23 @@ $persisted_state = get_option('clicklink_backfill_run_state', array());
 $assert(
     is_array($persisted_state) && (int) ($persisted_state['failures'] ?? 0) === 1,
     'Expected persisted scanner state option to expose run metadata for admin visibility.'
+);
+
+$reset_state = $scanner->reset_run();
+$assert(
+    $reset_state['status'] === 'pending',
+    'Expected reset_run() to return the scanner to pending state for manual restart.'
+);
+$assert(
+    $reset_state['processed_posts'] === 0
+        && $reset_state['changed_posts'] === 0
+        && $reset_state['inserted_links'] === 0
+        && $reset_state['failures'] === 0,
+    'Expected reset_run() to clear run counters to avoid stale progress metadata.'
+);
+$assert(
+    $reset_state['started_at'] === '' && $reset_state['completed_at'] === '',
+    'Expected reset_run() to clear run timestamps before the next manual run.'
 );
 
 if ($failures !== array()) {

@@ -170,12 +170,21 @@ final class ClickLink_Test_Admin_WPDB
 
         return max(0, $this->eligible_posts_count);
     }
+
+    /**
+     * @return array<int>
+     */
+    public function get_col(string $query): array
+    {
+        return array();
+    }
 }
 
 $clicklink_test_actions = array();
 $clicklink_test_submenus = array();
 $clicklink_test_redirects = array();
 $clicklink_test_can_manage = true;
+$clicklink_test_options = array();
 
 if (! function_exists('add_action')) {
     function add_action(string $hook, callable $callback): void
@@ -370,6 +379,34 @@ if (! function_exists('wp_safe_redirect')) {
     }
 }
 
+if (! function_exists('get_option')) {
+    /**
+     * @return mixed
+     */
+    function get_option(string $name, $default = false)
+    {
+        global $clicklink_test_options;
+
+        if (! array_key_exists($name, $clicklink_test_options)) {
+            return $default;
+        }
+
+        return $clicklink_test_options[$name];
+    }
+}
+
+if (! function_exists('update_option')) {
+    /**
+     * @param mixed $value
+     */
+    function update_option(string $name, $value, bool $autoload = false): void
+    {
+        global $clicklink_test_options;
+
+        $clicklink_test_options[$name] = $value;
+    }
+}
+
 if (! function_exists('wp_die')) {
     function wp_die(string $message): void
     {
@@ -422,6 +459,26 @@ $assert(
     isset($clicklink_test_actions['admin_post_clicklink_backfill_start']),
     'Expected register() to hook manual backfill start admin_post action.'
 );
+$assert(
+    isset($clicklink_test_actions['admin_post_clicklink_backfill_next_batch']),
+    'Expected register() to hook manual backfill next-batch admin_post action.'
+);
+$assert(
+    isset($clicklink_test_actions['admin_post_clicklink_backfill_reset']),
+    'Expected register() to hook manual backfill reset admin_post action.'
+);
+$assert(
+    isset($clicklink_test_actions['wp_ajax_clicklink_backfill_start']),
+    'Expected register() to hook manual backfill start AJAX action.'
+);
+$assert(
+    isset($clicklink_test_actions['wp_ajax_clicklink_backfill_next_batch']),
+    'Expected register() to hook manual backfill next-batch AJAX action.'
+);
+$assert(
+    isset($clicklink_test_actions['wp_ajax_clicklink_backfill_reset']),
+    'Expected register() to hook manual backfill reset AJAX action.'
+);
 
 $clicklink_test_can_manage = true;
 $page->register_menu();
@@ -460,6 +517,14 @@ $assert(
 $assert(
     str_contains($rendered_output, '<button type="submit" class="button button-primary" disabled>Run Now</button>'),
     'Expected Run Now scanner button to be disabled when no published blog posts are eligible.'
+);
+$assert(
+    str_contains($rendered_output, '<button type="submit" class="button button-secondary" disabled>Process Next Batch</button>'),
+    'Expected Process Next Batch button to be disabled when no run is active.'
+);
+$assert(
+    str_contains($rendered_output, '<button type="submit" class="button button-secondary" disabled>Cancel / Reset Run</button>'),
+    'Expected Cancel / Reset button to be disabled while scanner state is still pending.'
 );
 $assert(
     str_contains($rendered_output, 'Scanned posts'),
@@ -595,6 +660,61 @@ $latest_redirect = end($clicklink_test_redirects);
 $assert(
     is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=scan_started'),
     'Expected manual scan start action to initialize run state when eligible posts exist.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'bad-nonce',
+);
+$page->handle_next_batch();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
+    'Expected next-batch admin_post action to enforce nonce validation.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_next_batch',
+);
+$page->handle_next_batch();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=scan_completed'),
+    'Expected next-batch admin_post action to drive scanner runs toward completion.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'bad-nonce',
+);
+$page->handle_reset_scan();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
+    'Expected reset admin_post action to enforce nonce validation.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_reset',
+);
+$page->handle_reset_scan();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=scan_reset'),
+    'Expected reset admin_post action to return scanner state to pending.'
+);
+
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_next_batch',
+);
+$page->handle_next_batch();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=scan_not_running'),
+    'Expected next-batch action to require an active running scan.'
 );
 
 $_POST = array(

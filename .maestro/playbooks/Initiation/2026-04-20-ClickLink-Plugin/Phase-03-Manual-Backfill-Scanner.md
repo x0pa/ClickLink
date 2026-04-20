@@ -31,10 +31,15 @@ This phase adds a manual “Run Now” scanner that processes older blog posts w
     - Implemented admin-post start handling (`clicklink_backfill_start`) with capability + nonce checks and guarded redirects for already-running runs, successful run initialization, and start failures.
     - Added safe no-eligible-post fallback behavior by exposing `Backfill_Scanner::current_eligible_posts()` and using it to disable `Run Now`, show operator guidance, and prevent start attempts when no published blog posts are available.
 
-- [ ] Add manual execution endpoints (no scheduler):
+- [x] Add manual execution endpoints (no scheduler):
   - Implement secure AJAX/admin-post endpoints for `start`, `next-batch`, and `cancel/reset` actions
   - Keep execution strictly user-triggered from admin UI; do not register WP-Cron schedules
   - Add timeout-aware batch sizing and resilient error handling so partial failures do not corrupt run state
+  - Completion notes (2026-04-20, loop 00001):
+    - Added secure manual execution handlers for all scanner actions in `Admin_Page`: `admin_post_*` and `wp_ajax_*` endpoints for `clicklink_backfill_start`, `clicklink_backfill_next_batch`, and `clicklink_backfill_reset`, each protected by capability checks and action-specific nonces.
+    - Extended the admin scanner panel with explicit user-triggered controls for `Run Now`, `Process Next Batch`, and `Cancel / Reset Run`, with status-driven button disabling and operator notices for running/completed/error/reset flows.
+    - Hardened `Backfill_Scanner` execution for partial-failure resilience by persisting state after each processed post, adding explicit reset support, handling remaining-post lookup failures as `error` (instead of false completion), and capping requested batch sizes with timeout-aware limits.
+    - Kept execution manual-only with no cron/scheduler registration added anywhere in plugin bootstrap or admin wiring.
 
 - [ ] Integrate scanner with shared linker/statistics pipeline:
   - Route each scanned post through the same paragraph-only linker engine used on save
