@@ -25,8 +25,10 @@ final class Autoloader
             'Compatibility' => CLICKLINK_PATH . 'includes/class-compatibility.php',
             'Lifecycle' => CLICKLINK_PATH . 'includes/class-lifecycle.php',
             'Installer' => CLICKLINK_PATH . 'includes/class-installer.php',
+            'Linker_Stats' => CLICKLINK_PATH . 'includes/class-linker-stats.php',
             'Post_Save_Linker' => CLICKLINK_PATH . 'includes/class-post-save-linker.php',
             'Admin\\Admin_Page' => CLICKLINK_PATH . 'admin/class-admin-page.php',
+            'Admin\\Dashboard_Widget' => CLICKLINK_PATH . 'admin/class-dashboard-widget.php',
         );
 
         if (! isset($class_map[$relative_class])) {

@@ -9,10 +9,17 @@ final class Post_Save_Linker
     private const CONTENT_HASH_META_KEY = '_clicklink_content_hash';
     private const OPTIONS_OPTION_KEY = 'clicklink_options';
 
+    private Linker_Stats $stats;
+
     /**
      * @var array<int, bool>
      */
     private array $active_updates = array();
+
+    public function __construct(?Linker_Stats $stats = null)
+    {
+        $this->stats = $stats ?? new Linker_Stats();
+    }
 
     public function register(): void
     {
@@ -65,6 +72,7 @@ final class Post_Save_Linker
 
         if ($mappings === array()) {
             $this->persist_content_hash($post_id, $current_hash);
+            $this->stats->record_save_metrics($post_id, 0);
             return;
         }
 
@@ -72,6 +80,7 @@ final class Post_Save_Linker
 
         if ($max_links_per_post <= 0) {
             $this->persist_content_hash($post_id, $current_hash);
+            $this->stats->record_save_metrics($post_id, 0);
             return;
         }
 
@@ -81,15 +90,18 @@ final class Post_Save_Linker
 
         if ($links_inserted <= 0 || $linked_content === $content) {
             $this->persist_content_hash($post_id, $current_hash);
+            $this->stats->record_save_metrics($post_id, 0);
             return;
         }
 
         if ($this->update_post_content($post_id, $linked_content)) {
             $this->persist_content_hash($post_id, $this->content_hash($linked_content));
+            $this->stats->record_save_metrics($post_id, $links_inserted);
             return;
         }
 
         $this->persist_content_hash($post_id, $current_hash);
+        $this->stats->record_save_metrics($post_id, 0);
     }
 
     private function is_autosave_or_revision(int $post_id): bool

@@ -28,10 +28,11 @@ This phase creates a fully runnable ClickLink plugin baseline that installs clea
   - Process content body paragraphs only and skip headings, code/pre blocks, and existing anchors while enforcing the 5-links-per-post cap
   - Completion note (2026-04-20, loop 00001): Added `Post_Save_Linker` with `save_post_post` registration, autosave/revision/non-post and unchanged-content hash skips, randomized duplicate-keyword URL selection, paragraph-scoped replacement that protects headings/code/pre/existing anchors, and enforced `max_links_per_post` limits with deterministic `test-post-save-linker.php` coverage.
 
-- [ ] Add baseline metrics capture and stats widget output:
+- [x] Add baseline metrics capture and stats widget output:
   - Record per-save link insertion counts and cumulative totals needed for the admin widget
   - Create an admin dashboard/widget panel showing: total blog posts, total keyword/url rows, total links inserted, and posts touched by linker
   - Ensure stats update immediately after save operations and are safe if no mappings exist
+  - Completion note (2026-04-20, loop 00001): Added `Linker_Stats` persistence for per-save insert counts and cumulative totals (including unique posts touched), wired `Post_Save_Linker` to record metrics on qualifying saves, and introduced a `Dashboard_Widget` panel with total posts/mappings/links/touched output plus deterministic `test-dashboard-widget.php` coverage; all lint checks and `tests/run-tests.sh` now pass with zero-mapping safe rendering.
 
 - [ ] Write Phase 01 automated validation coverage:
   - Add focused unit tests for keyword matching, random URL selection constraints, paragraph-only replacement behavior, and post-level link cap enforcement

@@ -61,6 +61,18 @@ if (! function_exists('get_option')) {
     }
 }
 
+if (! function_exists('update_option')) {
+    /**
+     * @param mixed $value
+     */
+    function update_option(string $name, $value, bool $autoload = false): void
+    {
+        global $clicklink_test_options;
+
+        $clicklink_test_options[$name] = $value;
+    }
+}
+
 if (! function_exists('get_post_meta')) {
     /**
      * @return mixed
@@ -192,6 +204,7 @@ global $wpdb;
 $wpdb = new ClickLink_Test_Linker_WPDB();
 
 require_once __DIR__ . '/../includes/class-installer.php';
+require_once __DIR__ . '/../includes/class-linker-stats.php';
 require_once __DIR__ . '/../includes/class-post-save-linker.php';
 
 $failures = array();
@@ -280,6 +293,26 @@ $assert(
     $saved_hash === hash('sha256', str_replace("\r\n", "\n", $updated_content)),
     'Expected content hash metadata to be stored from the linked post body.'
 );
+$assert(
+    (int) (($clicklink_test_options['clicklink_stats']['total_links_inserted'] ?? 0)) === 5,
+    'Expected per-save metrics to increment cumulative total links inserted immediately.'
+);
+$assert(
+    (int) (($clicklink_test_options['clicklink_stats']['posts_touched'] ?? 0)) === 1,
+    'Expected posts_touched metrics to track unique posts updated by the linker.'
+);
+$assert(
+    (string) ($clicklink_test_post_meta[101]['_clicklink_links_inserted_last_save'] ?? '') === '5',
+    'Expected per-save metadata to capture the number of links inserted on the latest qualifying save.'
+);
+$assert(
+    (string) ($clicklink_test_post_meta[101]['_clicklink_touched_by_linker'] ?? '') === '1',
+    'Expected touched-post metadata to be marked after successful link insertion.'
+);
+$assert(
+    (string) ($clicklink_test_post_meta[101]['_clicklink_links_inserted_total'] ?? '') === '5',
+    'Expected post-level inserted link totals to accumulate for touched posts.'
+);
 
 $clicklink_test_updates = array();
 $unchanged_post = (object) array(
@@ -344,6 +377,18 @@ $linker->handle_post_save(505, $new_post, false);
 $assert(
     count($clicklink_test_updates) === 1 && (int) ($clicklink_test_updates[0]['ID'] ?? 0) === 505,
     'Expected new post saves to run linker even without prior content hash metadata.'
+);
+$assert(
+    (int) (($clicklink_test_options['clicklink_stats']['total_links_inserted'] ?? 0)) === 6,
+    'Expected cumulative link totals to include additional inserts from later qualifying saves.'
+);
+$assert(
+    (int) (($clicklink_test_options['clicklink_stats']['posts_touched'] ?? 0)) === 2,
+    'Expected posts_touched to increment when a second post receives inserted links.'
+);
+$assert(
+    (string) ($clicklink_test_post_meta[505]['_clicklink_links_inserted_last_save'] ?? '') === '1',
+    'Expected per-save metadata to track inserts for newly-linked posts.'
 );
 
 if ($failures !== array()) {
