@@ -65,7 +65,12 @@ This phase converts the prototype linker into a production-safe content transfor
     - Ran repository-wide PHP syntax quality check with `rg --files -g '*.php' | xargs -I{} php -l {}`.
     - No failing scenarios were detected, so no remediation changes were required; full suite remained green and Phase 01 coverage stayed intact.
 
-- [ ] Validate end-to-end author workflow against hardened rules:
+- [x] Validate end-to-end author workflow against hardened rules:
   - Smoke test post save behavior in WordPress admin with multiple mappings sharing the same keyword
   - Confirm only paragraph content is linked and excluded zones remain untouched
   - Verify stats counters still align with actual inserted links after hardening changes
+  - Completion notes (2026-04-20, loop 00001):
+    - Expanded the end-to-end admin/post-save smoke path in `tests/test-prototype-smoke.php` to save duplicate `Apple` keyword mappings and process mixed-content post HTML with multiple eligible paragraph matches.
+    - Added assertions confirming excluded regions remain untouched during linking (`h2`, existing `a`, `code`, `pre`, and non-paragraph `div`) while paragraph text receives exactly three inserted links.
+    - Added dynamic counter-alignment assertions ensuring actual inserted-link count matches stored totals in `clicklink_stats`, per-post meta counters (`_clicklink_links_inserted_last_save`, `_clicklink_links_inserted_total`), and dashboard widget output.
+    - Validated with `php tests/test-prototype-smoke.php`, `./tests/run-tests.sh`, and `rg --files -g '*.php' | xargs -I{} php -l {}` (all checks passing).

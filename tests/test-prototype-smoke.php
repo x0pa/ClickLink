@@ -716,7 +716,11 @@ $assert(
     'Expected mapping creation actions to redirect with success notices.'
 );
 
-$sample_content = '<h2>Apple heading</h2><p>Apple appears in this paragraph.</p><p>No keyword here.</p>';
+$sample_content = '<h2>Apple heading</h2>'
+    . '<p>Apple appears in this paragraph and apple appears again.</p>'
+    . '<p><code>apple</code> should stay plain and <a href="https://external.example.com/apple">apple</a> stays linked; Apple in text should link.</p>'
+    . '<pre>apple in pre block</pre>'
+    . '<div>apple in div block</div>';
 $clicklink_test_posts[9001] = array(
     'post_type' => 'post',
     'post_status' => 'publish',
@@ -738,26 +742,52 @@ if (is_array($save_post_hook) && isset($save_post_hook['callback']) && is_callab
 
 $updated_post = $clicklink_test_updates[0] ?? array();
 $updated_content = (string) ($updated_post['post_content'] ?? '');
+$linked_keyword_count = preg_match_all('/href="https:\/\/example\.com\/apple-(?:a|b)"/', $updated_content, $linked_keyword_matches);
+$inserted_link_count = max(0, (int) $linked_keyword_count);
 
 $assert(
     count($clicklink_test_updates) === 1,
     'Expected smoke post save to update content exactly once.'
 );
 $assert(
-    str_contains($updated_content, '<a href="https://example.com/apple-a">Apple</a>'),
-    'Expected smoke post save to auto-link paragraph keyword content.'
+    $inserted_link_count === 3,
+    'Expected smoke post save to link all eligible paragraph keyword matches when duplicate keyword mappings exist.'
 );
 $assert(
     str_contains($updated_content, '<h2>Apple heading</h2>'),
     'Expected smoke post save to skip linking heading content.'
 );
 $assert(
-    (int) ($clicklink_test_options['clicklink_stats']['total_links_inserted'] ?? 0) === 1,
-    'Expected smoke post save to increment total_links_inserted.'
+    str_contains($updated_content, '<code>apple</code>'),
+    'Expected smoke post save to keep code-tag keyword content untouched.'
+);
+$assert(
+    str_contains($updated_content, '<a href="https://external.example.com/apple">apple</a>'),
+    'Expected smoke post save to keep existing anchor-tag keyword content untouched.'
+);
+$assert(
+    str_contains($updated_content, '<pre>apple in pre block</pre>'),
+    'Expected smoke post save to keep pre-tag keyword content untouched.'
+);
+$assert(
+    str_contains($updated_content, '<div>apple in div block</div>'),
+    'Expected smoke post save to keep non-paragraph block keyword content untouched.'
+);
+$assert(
+    (int) ($clicklink_test_options['clicklink_stats']['total_links_inserted'] ?? 0) === $inserted_link_count,
+    'Expected smoke post save to align total_links_inserted with actual inserted link count.'
 );
 $assert(
     (int) ($clicklink_test_options['clicklink_stats']['posts_touched'] ?? 0) === 1,
     'Expected smoke post save to increment posts_touched.'
+);
+$assert(
+    (int) ($clicklink_test_post_meta[9001]['_clicklink_links_inserted_last_save'] ?? 0) === $inserted_link_count,
+    'Expected smoke post save to align per-post last-save link counter with actual inserted link count.'
+);
+$assert(
+    (int) ($clicklink_test_post_meta[9001]['_clicklink_links_inserted_total'] ?? 0) === $inserted_link_count,
+    'Expected smoke post save to align per-post cumulative link counter with actual inserted link count.'
 );
 
 $dashboard_hooks = $clicklink_test_actions['wp_dashboard_setup'] ?? array();
@@ -791,8 +821,8 @@ $assert(
     'Expected dashboard widget smoke output to show saved mapping count.'
 );
 $assert(
-    str_contains($widget_output, '<th scope="row">Total links inserted</th><td>1</td>'),
-    'Expected dashboard widget smoke output to show cumulative inserted links.'
+    str_contains($widget_output, '<th scope="row">Total links inserted</th><td>' . (string) $inserted_link_count . '</td>'),
+    'Expected dashboard widget smoke output to align cumulative inserted links with actual inserted link count.'
 );
 $assert(
     str_contains($widget_output, '<th scope="row">Posts touched by linker</th><td>1</td>'),
