@@ -95,6 +95,21 @@ final class ClickLink_Test_Admin_WPDB
     }
 
     /**
+     * @return int|false
+     */
+    public function query(string $query)
+    {
+        if (! str_contains(strtoupper($query), 'DELETE FROM')) {
+            return false;
+        }
+
+        $deleted = count($this->rows);
+        $this->rows = array();
+
+        return $deleted;
+    }
+
+    /**
      * @param mixed ...$args
      */
     public function prepare(string $query, ...$args): string
@@ -667,6 +682,10 @@ $assert(
     'Expected register() to hook manual backfill reset admin_post action.'
 );
 $assert(
+    isset($clicklink_test_actions['admin_post_clicklink_reset_operational_state']),
+    'Expected register() to hook operational reset admin_post action.'
+);
+$assert(
     isset($clicklink_test_actions['wp_ajax_clicklink_backfill_start']),
     'Expected register() to hook manual backfill start AJAX action.'
 );
@@ -736,6 +755,10 @@ $assert(
 $assert(
     str_contains($rendered_output, 'No published blog posts are currently eligible for backfill.'),
     'Expected safe fallback messaging when no published blog posts are eligible for manual backfill.'
+);
+$assert(
+    str_contains($rendered_output, 'Operational Reset'),
+    'Expected admin render output to include the operational reset controls section.'
 );
 
 $wpdb->eligible_posts_count = 4;
@@ -1115,6 +1138,62 @@ $assert(
 );
 
 $_POST = array(
+    '_wpnonce' => 'bad-nonce',
+);
+$page->handle_reset_operational_state();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
+    'Expected operational reset action to enforce nonce validation.'
+);
+
+$rows_before_safe_operational_reset = count($wpdb->rows);
+$clicklink_test_options['clicklink_stats'] = array(
+    'total_links_inserted' => 9,
+    'posts_touched' => 3,
+    'keyword_match_counts' => array(
+        'apple' => 9,
+    ),
+);
+$clicklink_test_options['clicklink_backfill_run_state'] = array(
+    'status' => 'completed',
+    'inserted_links' => 7,
+    'processed_posts' => 4,
+    'changed_posts' => 2,
+);
+$wpdb->eligible_posts_count = 6;
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_reset_operational_state',
+);
+$page->handle_reset_operational_state();
+$latest_redirect = end($clicklink_test_redirects);
+$stats_after_safe_operational_reset = get_option('clicklink_stats', array());
+$backfill_after_safe_operational_reset = get_option('clicklink_backfill_run_state', array());
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=operational_reset'),
+    'Expected operational reset action to report success when resetting stats/backfill state only.'
+);
+$assert(
+    is_array($stats_after_safe_operational_reset)
+        && (int) ($stats_after_safe_operational_reset['total_links_inserted'] ?? -1) === 0
+        && (int) ($stats_after_safe_operational_reset['posts_touched'] ?? -1) === 0
+        && ($stats_after_safe_operational_reset['keyword_match_counts'] ?? array()) === array(),
+    'Expected operational reset action to clear global linker stats state.'
+);
+$assert(
+    is_array($backfill_after_safe_operational_reset)
+        && (($backfill_after_safe_operational_reset['status'] ?? '') === 'pending')
+        && (int) ($backfill_after_safe_operational_reset['total_eligible_posts'] ?? 0) === 6,
+    'Expected operational reset action to reset manual backfill run state to pending.'
+);
+$assert(
+    count($wpdb->rows) === $rows_before_safe_operational_reset,
+    'Expected operational reset action to keep mappings unchanged unless explicit deletion is requested.'
+);
+
+$_POST = array(
     '_wpnonce' => 'nonce-clicklink_backfill_next_batch',
 );
 $page->handle_next_batch();
@@ -1228,6 +1307,43 @@ $latest_redirect = end($clicklink_test_redirects);
 $assert(
     is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=not_found'),
     'Expected deleting a missing row to redirect with not_found notice.'
+);
+
+$clicklink_test_options['clicklink_stats'] = array(
+    'total_links_inserted' => 5,
+    'posts_touched' => 2,
+    'keyword_match_counts' => array(
+        'apple' => 5,
+    ),
+);
+$clicklink_test_options['clicklink_backfill_run_state'] = array(
+    'status' => 'completed',
+    'inserted_links' => 5,
+);
+$rows_before_operational_delete = count($wpdb->rows);
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_reset_operational_state',
+    'clicklink_reset_include_mappings' => '1',
+);
+$page->handle_reset_operational_state();
+$latest_redirect = end($clicklink_test_redirects);
+$stats_after_operational_delete = get_option('clicklink_stats', array());
+
+$assert(
+    is_string($latest_redirect)
+        && str_contains($latest_redirect, 'clicklink_notice=operational_reset_with_mappings')
+        && str_contains($latest_redirect, 'clicklink_reset_deleted_mappings=' . $rows_before_operational_delete),
+    'Expected operational reset with explicit mapping deletion to report deleted-row counts.'
+);
+$assert(
+    $rows_before_operational_delete > 0 && count($wpdb->rows) === 0,
+    'Expected operational reset to delete all mappings only when explicit deletion is selected.'
+);
+$assert(
+    is_array($stats_after_operational_delete)
+        && (int) ($stats_after_operational_delete['total_links_inserted'] ?? -1) === 0
+        && (int) ($stats_after_operational_delete['posts_touched'] ?? -1) === 0,
+    'Expected operational reset with mapping deletion to still clear linker stats.'
 );
 
 $clicklink_test_can_manage = false;

@@ -28,10 +28,13 @@ This phase turns ClickLink into a polished, release-ready plugin by expanding ac
   - Completed 2026-04-20: Added nonce-protected `clicklink_bulk_delete_mappings` admin action with capability checks, selected-row deletion, and user-facing success/error notices (including deleted-row counts).
   - Completed 2026-04-20: Expanded admin validation feedback to distinguish empty keyword, empty URL, and malformed URL input; added comprehensive regression assertions in `tests/test-admin-page.php` for new UX and security behavior.
 
-- [ ] Add operational safety controls and diagnostics:
+- [x] Add operational safety controls and diagnostics:
   - Implement a safe reset tool for stats/backfill run state (without deleting mappings unless explicitly chosen)
   - Add structured debug logging hooks (toggleable) for linking and backfill errors to support troubleshooting
   - Add guardrails for unexpected HTML/content edge cases so failures degrade gracefully
+  - Completed 2026-04-20: Added an admin-only, nonce/capability-gated operational reset tool in `Admin_Page` that resets global linker stats plus manual backfill run state by default, while deleting mappings only when an explicit checkbox is selected.
+  - Completed 2026-04-20: Added toggleable structured diagnostics via `Runtime::debug_log()` / `Runtime::is_debug_logging_enabled()` with `clicklink_debug_logging_enabled` filter and `clicklink_debug_log` action, and instrumented linker/backfill failure paths.
+  - Completed 2026-04-20: Hardened `Post_Save_Linker` content handling with fail-safe guards for oversized/invalid UTF-8 content and exception-safe linking fallback; expanded admin/linker/backfill regression tests accordingly.
 
 - [ ] Write comprehensive regression and acceptance tests:
   - Add integration tests covering save-time linking + manual backfill + stats coherence across repeated runs

@@ -108,6 +108,8 @@ $clicklink_test_options = array(
 $clicklink_test_post_meta = array();
 $clicklink_test_updates = array();
 $clicklink_test_get_post_fail_ids = array();
+$clicklink_test_debug_log_enabled = true;
+$clicklink_test_debug_events = array();
 $clicklink_test_posts = array(
     1 => array(
         'post_type' => 'post',
@@ -144,6 +146,46 @@ if (! function_exists('get_option')) {
         }
 
         return $clicklink_test_options[$name];
+    }
+}
+
+if (! function_exists('apply_filters')) {
+    /**
+     * @param mixed $value
+     * @param mixed ...$args
+     * @return mixed
+     */
+    function apply_filters(string $hook, $value, ...$args)
+    {
+        global $clicklink_test_debug_log_enabled;
+
+        if ($hook === 'clicklink_debug_logging_enabled') {
+            return (bool) $clicklink_test_debug_log_enabled;
+        }
+
+        return $value;
+    }
+}
+
+if (! function_exists('do_action')) {
+    /**
+     * @param mixed ...$args
+     */
+    function do_action(string $hook, ...$args): void
+    {
+        global $clicklink_test_debug_events;
+
+        if ($hook !== 'clicklink_debug_log') {
+            return;
+        }
+
+        $payload = $args[0] ?? null;
+
+        if (! is_array($payload)) {
+            return;
+        }
+
+        $clicklink_test_debug_events[] = $payload;
     }
 }
 
@@ -339,6 +381,7 @@ $reset_environment = static function (): void {
     global $clicklink_test_post_meta;
     global $clicklink_test_updates;
     global $clicklink_test_get_post_fail_ids;
+    global $clicklink_test_debug_events;
     global $clicklink_test_posts;
     global $wpdb;
 
@@ -350,6 +393,7 @@ $reset_environment = static function (): void {
     $clicklink_test_post_meta = array();
     $clicklink_test_updates = array();
     $clicklink_test_get_post_fail_ids = array();
+    $clicklink_test_debug_events = array();
     $clicklink_test_posts = array(
         1 => array(
             'post_type' => 'post',
@@ -605,6 +649,29 @@ $assert(
 $assert(
     str_contains($failure_state['last_error'], 'Unable to load post ID 4'),
     'Expected scanner to persist last_error details for failed post processing.'
+);
+$load_failure_debug_logged = false;
+
+foreach ($clicklink_test_debug_events as $debug_event) {
+    if (! is_array($debug_event)) {
+        continue;
+    }
+
+    if (($debug_event['event'] ?? '') !== 'backfill.post_load_failed') {
+        continue;
+    }
+
+    $context = $debug_event['context'] ?? array();
+
+    if (is_array($context) && (int) ($context['post_id'] ?? 0) === 4) {
+        $load_failure_debug_logged = true;
+        break;
+    }
+}
+
+$assert(
+    $load_failure_debug_logged,
+    'Expected backfill load failures to emit structured debug logs when diagnostics are enabled.'
 );
 
 $persisted_state = get_option('clicklink_backfill_run_state', array());

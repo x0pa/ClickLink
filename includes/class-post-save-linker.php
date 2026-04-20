@@ -4,10 +4,13 @@ declare(strict_types=1);
 
 namespace ClickLink;
 
+require_once __DIR__ . '/class-runtime.php';
+
 final class Post_Save_Linker
 {
     private const CONTENT_HASH_META_KEY = '_clicklink_content_hash';
     private const OPTIONS_OPTION_KEY = 'clicklink_options';
+    private const MAX_CONTENT_BYTES = 1500000;
     private const EXCLUDED_CONTEXT_TAGS = array(
         'a' => true,
         'code' => true,
@@ -130,7 +133,20 @@ final class Post_Save_Linker
             return $result;
         }
 
-        $link_result = $this->link_content($content, $mappings, $max_links_per_post);
+        try {
+            $link_result = $this->link_content($post_id, $content, $mappings, $max_links_per_post);
+        } catch (\Throwable $throwable) {
+            Runtime::debug_log(
+                'linker.content_linking_exception',
+                array(
+                    'post_id' => $post_id,
+                    'error' => Runtime::throwable_message($throwable),
+                )
+            );
+            $this->persist_content_hash($post_id, $current_hash);
+            $this->stats->record_save_metrics($post_id, 0);
+            return $result;
+        }
         $linked_content = (string) ($link_result['content'] ?? $content);
         $links_inserted = (int) ($link_result['inserted_links'] ?? 0);
         $keyword_hits = is_array($link_result['keyword_hits'] ?? null)
@@ -159,6 +175,13 @@ final class Post_Save_Linker
             );
         }
 
+        Runtime::debug_log(
+            'linker.post_update_failed',
+            array(
+                'post_id' => $post_id,
+                'inserted_links' => max(0, $links_inserted),
+            )
+        );
         $this->persist_content_hash($post_id, $current_hash);
         $this->stats->record_save_metrics($post_id, 0);
 
@@ -276,9 +299,17 @@ final class Post_Save_Linker
      * @param array<string, array<int, string>> $mappings
      * @return array{content: string, inserted_links: int, keyword_hits: array<string, int>}
      */
-    private function link_content(string $content, array $mappings, int $max_links_per_post): array
+    private function link_content(int $post_id, string $content, array $mappings, int $max_links_per_post): array
     {
         if ($content === '' || $max_links_per_post <= 0 || $mappings === array()) {
+            return array(
+                'content' => $content,
+                'inserted_links' => 0,
+                'keyword_hits' => array(),
+            );
+        }
+
+        if (! $this->is_content_safe_for_linking($post_id, $content)) {
             return array(
                 'content' => $content,
                 'inserted_links' => 0,
@@ -410,6 +441,36 @@ final class Post_Save_Linker
             'inserted_links' => $inserted_links,
             'keyword_hits' => $keyword_hits,
         );
+    }
+
+    private function is_content_safe_for_linking(int $post_id, string $content): bool
+    {
+        $content_bytes = strlen($content);
+
+        if ($content_bytes > self::MAX_CONTENT_BYTES) {
+            Runtime::debug_log(
+                'linker.content_too_large',
+                array(
+                    'post_id' => $post_id,
+                    'content_bytes' => $content_bytes,
+                    'max_content_bytes' => self::MAX_CONTENT_BYTES,
+                )
+            );
+            return false;
+        }
+
+        if (function_exists('mb_check_encoding') && ! mb_check_encoding($content, 'UTF-8')) {
+            Runtime::debug_log(
+                'linker.content_invalid_utf8',
+                array(
+                    'post_id' => $post_id,
+                    'content_bytes' => $content_bytes,
+                )
+            );
+            return false;
+        }
+
+        return true;
     }
 
     /**

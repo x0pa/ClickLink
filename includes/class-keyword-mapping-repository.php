@@ -295,6 +295,71 @@ final class Keyword_Mapping_Repository
         return is_array($result);
     }
 
+    /**
+     * @return int|false
+     */
+    public function delete_all_mappings()
+    {
+        global $wpdb;
+
+        if (! is_object($wpdb)) {
+            return false;
+        }
+
+        $table_name = Installer::table_name();
+        $deleted = false;
+
+        if (method_exists($wpdb, 'query')) {
+            $deleted = $wpdb->query("DELETE FROM {$table_name}");
+        }
+
+        if ($deleted === false && method_exists($wpdb, 'get_results') && method_exists($wpdb, 'delete')) {
+            $rows = $wpdb->get_results("SELECT id FROM {$table_name}", 'ARRAY_A');
+
+            if (! is_array($rows)) {
+                return false;
+            }
+
+            $deleted_count = 0;
+
+            foreach ($rows as $row) {
+                if (! is_array($row)) {
+                    continue;
+                }
+
+                $mapping_id = Runtime::positive_int($row['id'] ?? 0);
+
+                if ($mapping_id <= 0) {
+                    continue;
+                }
+
+                $result = $wpdb->delete(
+                    $table_name,
+                    array(
+                        'id' => $mapping_id,
+                    ),
+                    array('%d')
+                );
+
+                if ($result === false) {
+                    return false;
+                }
+
+                $deleted_count += max(0, (int) $result);
+            }
+
+            $deleted = $deleted_count;
+        }
+
+        if ($deleted === false) {
+            return false;
+        }
+
+        $this->invalidate_grouped_cache();
+
+        return max(0, (int) $deleted);
+    }
+
     public function invalidate_grouped_cache(): void
     {
         $this->grouped_keyword_url_cache = null;

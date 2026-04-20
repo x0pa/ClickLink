@@ -197,6 +197,12 @@ final class Linker_Stats
         return Runtime::non_negative_int($count);
     }
 
+    public function reset_totals(): void
+    {
+        $this->persist_totals(self::default_totals());
+        $this->clear_post_linker_meta();
+    }
+
     /**
      * @return array{total_links_inserted: int, posts_touched: int, keyword_match_counts: array<string, int>}
      */
@@ -266,6 +272,17 @@ final class Linker_Stats
         }
 
         update_post_meta($post_id, $meta_key, $value);
+    }
+
+    private function clear_post_linker_meta(): void
+    {
+        if (! function_exists('delete_post_meta_by_key')) {
+            return;
+        }
+
+        delete_post_meta_by_key(self::TOUCHED_POST_META_KEY);
+        delete_post_meta_by_key(self::LAST_SAVE_META_KEY);
+        delete_post_meta_by_key(self::POST_TOTAL_META_KEY);
     }
 
     /**

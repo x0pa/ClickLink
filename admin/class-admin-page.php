@@ -7,6 +7,7 @@ namespace ClickLink\Admin;
 use ClickLink\Backfill_Scanner;
 use ClickLink\Installer;
 use ClickLink\Keyword_Mapping_Repository;
+use ClickLink\Linker_Stats;
 use ClickLink\Runtime;
 use RuntimeException;
 
@@ -20,8 +21,11 @@ final class Admin_Page
     private const START_SCAN_ACTION = 'clicklink_backfill_start';
     private const NEXT_BATCH_ACTION = 'clicklink_backfill_next_batch';
     private const RESET_SCAN_ACTION = 'clicklink_backfill_reset';
+    private const RESET_OPERATIONAL_STATE_ACTION = 'clicklink_reset_operational_state';
     private const NOTICE_QUERY_KEY = 'clicklink_notice';
     private const BULK_DELETED_COUNT_QUERY_KEY = 'clicklink_deleted_count';
+    private const RESET_DELETED_MAPPINGS_COUNT_QUERY_KEY = 'clicklink_reset_deleted_mappings';
+    private const RESET_INCLUDE_MAPPINGS_KEY = 'clicklink_reset_include_mappings';
     private const MAPPINGS_SEARCH_QUERY_KEY = 'clicklink_mappings_search';
     private const MAPPINGS_KEYWORD_FILTER_QUERY_KEY = 'clicklink_mappings_keyword';
     private const MAPPINGS_SORT_QUERY_KEY = 'clicklink_mappings_sort';
@@ -57,6 +61,7 @@ final class Admin_Page
                 self::START_SCAN_ACTION => 'handle_start_scan',
                 self::NEXT_BATCH_ACTION => 'handle_next_batch',
                 self::RESET_SCAN_ACTION => 'handle_reset_scan',
+                self::RESET_OPERATIONAL_STATE_ACTION => 'handle_reset_operational_state',
             )
         );
         $this->register_action_handlers(
@@ -103,6 +108,7 @@ final class Admin_Page
         echo '<p>' . self::escape(self::translate('Manage keyword-to-URL mappings used by ClickLink auto-linking. Duplicate keywords are allowed.')) . '</p>';
         $this->render_notice();
         $this->render_backfill_scanner_panel();
+        $this->render_operational_reset_panel();
         $this->render_form($edit_mapping);
         $this->render_mappings_table();
         echo '</div>';
@@ -288,6 +294,52 @@ final class Admin_Page
         }
 
         $this->redirect_with_notice($this->reset_scan_notice_code());
+    }
+
+    public function handle_reset_operational_state(): void
+    {
+        if (! self::can_manage()) {
+            $this->deny_access();
+            return;
+        }
+
+        if (! $this->verify_nonce(self::RESET_OPERATIONAL_STATE_ACTION)) {
+            $this->redirect_with_notice('invalid_nonce');
+            return;
+        }
+
+        $include_mapping_reset = self::request_post(self::RESET_INCLUDE_MAPPINGS_KEY) === '1';
+        $stats_reset = $this->reset_stats_state();
+        $scan_reset = $this->reset_scan_notice_code() === 'scan_reset';
+        $deleted_mapping_count = 0;
+        $mapping_reset = true;
+
+        if ($include_mapping_reset) {
+            $deleted = $this->mapping_repository->delete_all_mappings();
+
+            if ($deleted === false) {
+                $mapping_reset = false;
+            } else {
+                $deleted_mapping_count = max(0, (int) $deleted);
+            }
+        }
+
+        if (! $stats_reset || ! $scan_reset || ! $mapping_reset) {
+            $this->redirect_with_notice('operational_reset_failed');
+            return;
+        }
+
+        if (! $include_mapping_reset) {
+            $this->redirect_with_notice('operational_reset');
+            return;
+        }
+
+        $this->redirect_with_notice(
+            'operational_reset_with_mappings',
+            array(
+                self::RESET_DELETED_MAPPINGS_COUNT_QUERY_KEY => (string) $deleted_mapping_count,
+            )
+        );
     }
 
     public function handle_start_scan_ajax(): void
@@ -508,6 +560,24 @@ final class Admin_Page
         echo '</form>';
     }
 
+    private function render_operational_reset_panel(): void
+    {
+        echo '<hr />';
+        echo '<h2>' . self::escape(self::translate('Operational Reset')) . '</h2>';
+        echo '<p>' . self::escape(self::translate('Reset accumulated stats and manual backfill state when diagnosing unexpected behavior. Mappings stay intact unless explicitly selected below.')) . '</p>';
+        echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
+        echo '<input type="hidden" name="action" value="' . self::escape_attr(self::RESET_OPERATIONAL_STATE_ACTION) . '">';
+        echo self::nonce_field(self::RESET_OPERATIONAL_STATE_ACTION);
+        echo '<p><label>';
+        echo '<input type="checkbox" name="' . self::escape_attr(self::RESET_INCLUDE_MAPPINGS_KEY) . '" value="1"> ';
+        echo self::escape(self::translate('Also delete all keyword mappings (cannot be undone).'));
+        echo '</label></p>';
+        echo '<p class="submit"><button type="submit" class="button button-secondary">';
+        echo self::escape(self::translate('Reset Stats and Backfill State'));
+        echo '</button></p>';
+        echo '</form>';
+    }
+
     /**
      * @param array{id: int, keyword: string, url: string}|null $edit_mapping
      */
@@ -644,6 +714,8 @@ final class Admin_Page
             'scan_batch_processed' => array('class' => 'notice-success', 'message' => self::translate('Processed one backfill batch. Continue until completion.')),
             'scan_completed' => array('class' => 'notice-success', 'message' => self::translate('Manual backfill run completed.')),
             'scan_reset' => array('class' => 'notice-success', 'message' => self::translate('Manual backfill run has been reset to pending state.')),
+            'operational_reset' => array('class' => 'notice-success', 'message' => self::translate('Operational reset completed: stats and backfill state were reset.')),
+            'operational_reset_with_mappings' => array('class' => 'notice-success', 'message' => $this->operational_reset_with_mappings_notice_message()),
             'scan_already_running' => array('class' => 'notice-warning', 'message' => self::translate('A manual backfill run is already in progress.')),
             'scan_not_running' => array('class' => 'notice-warning', 'message' => self::translate('Start a run before processing the next batch.')),
             'scan_no_posts' => array('class' => 'notice-info', 'message' => self::translate('No published blog posts are currently eligible for backfill.')),
@@ -651,6 +723,7 @@ final class Admin_Page
             'scan_start_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to start manual backfill run. Please try again.')),
             'scan_next_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to process the next batch. Please review scanner status and retry.')),
             'scan_reset_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to reset manual backfill state. Please try again.')),
+            'operational_reset_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to complete operational reset. Please try again.')),
             'bulk_deleted' => array('class' => 'notice-success', 'message' => $this->bulk_deleted_notice_message()),
             'bulk_action_required' => array('class' => 'notice-error', 'message' => self::translate('Choose a bulk action before applying changes.')),
             'bulk_selection_required' => array('class' => 'notice-error', 'message' => self::translate('Select at least one mapping row to delete.')),
@@ -871,6 +944,24 @@ final class Admin_Page
             (string) self::translate('Deleted %s mapping row(s).'),
             self::format_number($deleted_count)
         );
+    }
+
+    private function operational_reset_with_mappings_notice_message(): string
+    {
+        $deleted_count = Runtime::non_negative_int(self::request_get(self::RESET_DELETED_MAPPINGS_COUNT_QUERY_KEY));
+
+        return sprintf(
+            (string) self::translate('Operational reset completed: stats and backfill state were reset, and %s mapping row(s) were deleted.'),
+            self::format_number($deleted_count)
+        );
+    }
+
+    private function reset_stats_state(): bool
+    {
+        $stats = new Linker_Stats();
+        $stats->reset_totals();
+
+        return true;
     }
 
     private function mapping_table_url(array $query_args): string

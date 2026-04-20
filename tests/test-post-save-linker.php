@@ -31,6 +31,8 @@ $clicklink_test_autosave_ids = array();
 $clicklink_test_revision_ids = array();
 $clicklink_test_updates = array();
 $clicklink_test_rand_sequence = array();
+$clicklink_test_debug_log_enabled = true;
+$clicklink_test_debug_events = array();
 
 if (! function_exists('add_action')) {
     function add_action(string $hook, callable $callback, int $priority = 10, int $accepted_args = 1): void
@@ -42,6 +44,46 @@ if (! function_exists('add_action')) {
             'priority' => $priority,
             'accepted_args' => $accepted_args,
         );
+    }
+}
+
+if (! function_exists('apply_filters')) {
+    /**
+     * @param mixed $value
+     * @param mixed ...$args
+     * @return mixed
+     */
+    function apply_filters(string $hook, $value, ...$args)
+    {
+        global $clicklink_test_debug_log_enabled;
+
+        if ($hook === 'clicklink_debug_logging_enabled') {
+            return (bool) $clicklink_test_debug_log_enabled;
+        }
+
+        return $value;
+    }
+}
+
+if (! function_exists('do_action')) {
+    /**
+     * @param mixed ...$args
+     */
+    function do_action(string $hook, ...$args): void
+    {
+        global $clicklink_test_debug_events;
+
+        if ($hook !== 'clicklink_debug_log') {
+            return;
+        }
+
+        $payload = $args[0] ?? null;
+
+        if (! is_array($payload)) {
+            return;
+        }
+
+        $clicklink_test_debug_events[] = $payload;
     }
 }
 
@@ -411,6 +453,51 @@ $assert(
 $assert(
     (string) ($clicklink_test_post_meta[505]['_clicklink_links_inserted_last_save'] ?? '') === '1',
     'Expected per-save metadata to track inserts for newly-linked posts.'
+);
+
+$updates_before_invalid_utf8 = count($clicklink_test_updates);
+$stats_total_before_invalid_utf8 = (int) (($clicklink_test_options['clicklink_stats']['total_links_inserted'] ?? 0));
+$invalid_utf8_post = (object) array(
+    'ID' => 606,
+    'post_type' => 'post',
+    'post_content' => "<p>Apple\xC3( banana</p>",
+);
+$linker->handle_post_save(606, $invalid_utf8_post, false);
+$stats_total_after_invalid_utf8 = (int) (($clicklink_test_options['clicklink_stats']['total_links_inserted'] ?? 0));
+$invalid_utf8_debug_logged = false;
+
+foreach ($clicklink_test_debug_events as $debug_event) {
+    if (! is_array($debug_event)) {
+        continue;
+    }
+
+    if (($debug_event['event'] ?? '') !== 'linker.content_invalid_utf8') {
+        continue;
+    }
+
+    $context = $debug_event['context'] ?? array();
+
+    if (is_array($context) && (int) ($context['post_id'] ?? 0) === 606) {
+        $invalid_utf8_debug_logged = true;
+        break;
+    }
+}
+
+$assert(
+    count($clicklink_test_updates) === $updates_before_invalid_utf8,
+    'Expected malformed UTF-8 content to fail safe without attempting post content mutations.'
+);
+$assert(
+    $stats_total_after_invalid_utf8 === $stats_total_before_invalid_utf8,
+    'Expected malformed UTF-8 content handling to avoid incrementing inserted-link stats.'
+);
+$assert(
+    (string) ($clicklink_test_post_meta[606]['_clicklink_content_hash'] ?? '') !== '',
+    'Expected malformed UTF-8 content handling to still persist a content hash for future save comparisons.'
+);
+$assert(
+    $invalid_utf8_debug_logged,
+    'Expected malformed UTF-8 content handling to emit structured linker debug logs when diagnostics are enabled.'
 );
 
 if ($failures !== array()) {

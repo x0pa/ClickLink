@@ -187,6 +187,14 @@ final class Backfill_Scanner
             if (! is_object($post)) {
                 $state['failures']++;
                 $state['last_error'] = 'Unable to load post ID ' . $post_id . ' for backfill processing.';
+                Runtime::debug_log(
+                    'backfill.post_load_failed',
+                    array(
+                        'post_id' => $post_id,
+                        'cursor_post_id' => (int) $state['cursor_post_id'],
+                        'processed_posts' => (int) $state['processed_posts'],
+                    )
+                );
                 $this->persist_state($state);
                 continue;
             }
@@ -196,6 +204,15 @@ final class Backfill_Scanner
             } catch (\Throwable $throwable) {
                 $state['failures']++;
                 $state['last_error'] = Runtime::throwable_message($throwable);
+                Runtime::debug_log(
+                    'backfill.post_processing_exception',
+                    array(
+                        'post_id' => $post_id,
+                        'error' => $state['last_error'],
+                        'cursor_post_id' => (int) $state['cursor_post_id'],
+                        'processed_posts' => (int) $state['processed_posts'],
+                    )
+                );
                 $this->persist_state($state);
                 continue;
             }
@@ -326,6 +343,15 @@ final class Backfill_Scanner
         $state['status'] = self::STATUS_ERROR;
         $state['last_error'] = trim($message);
         $state['completed_at'] = Runtime::current_datetime_utc();
+        Runtime::debug_log(
+            'backfill.state_error',
+            array(
+                'message' => $state['last_error'],
+                'cursor_post_id' => (int) $state['cursor_post_id'],
+                'processed_posts' => (int) $state['processed_posts'],
+                'failures' => (int) $state['failures'],
+            )
+        );
         $this->persist_state($state);
 
         return $state;
