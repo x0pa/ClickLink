@@ -5,6 +5,8 @@ declare(strict_types=1);
 final class ClickLink_Test_Admin_WPDB
 {
     public string $prefix = 'wp_';
+    public string $posts = 'wp_posts';
+    public int $eligible_posts_count = 0;
 
     /**
      * @var array<int, array{id: int, keyword: string, url: string, created_at: string, updated_at: string}>
@@ -155,6 +157,18 @@ final class ClickLink_Test_Admin_WPDB
         );
 
         return $rows;
+    }
+
+    /**
+     * @return int
+     */
+    public function get_var(string $query)
+    {
+        if (! str_contains($query, 'COUNT(*)')) {
+            return 0;
+        }
+
+        return max(0, $this->eligible_posts_count);
     }
 }
 
@@ -375,6 +389,9 @@ $wpdb = new ClickLink_Test_Admin_WPDB();
 
 require_once __DIR__ . '/../includes/class-installer.php';
 require_once __DIR__ . '/../includes/class-keyword-mapping-repository.php';
+require_once __DIR__ . '/../includes/class-linker-stats.php';
+require_once __DIR__ . '/../includes/class-post-save-linker.php';
+require_once __DIR__ . '/../includes/class-backfill-scanner.php';
 require_once __DIR__ . '/../admin/class-admin-page.php';
 
 $failures = array();
@@ -401,6 +418,10 @@ $assert(
     isset($clicklink_test_actions['admin_post_clicklink_delete_mapping']),
     'Expected register() to hook delete mapping admin_post action.'
 );
+$assert(
+    isset($clicklink_test_actions['admin_post_clicklink_backfill_start']),
+    'Expected register() to hook manual backfill start admin_post action.'
+);
 
 $clicklink_test_can_manage = true;
 $page->register_menu();
@@ -424,6 +445,45 @@ $assert(
 );
 
 $clicklink_test_can_manage = true;
+$wpdb->eligible_posts_count = 0;
+
+$_GET = array();
+$_POST = array();
+ob_start();
+$page->render();
+$rendered_output = (string) ob_get_clean();
+
+$assert(
+    str_contains($rendered_output, 'Manual Backfill Scanner'),
+    'Expected admin render output to include the manual backfill scanner section.'
+);
+$assert(
+    str_contains($rendered_output, '<button type="submit" class="button button-primary" disabled>Run Now</button>'),
+    'Expected Run Now scanner button to be disabled when no published blog posts are eligible.'
+);
+$assert(
+    str_contains($rendered_output, 'Scanned posts'),
+    'Expected scanner panel to render scanned-post counters for run summary visibility.'
+);
+$assert(
+    str_contains($rendered_output, 'Remaining posts'),
+    'Expected scanner panel to render remaining-post counters for run summary visibility.'
+);
+$assert(
+    str_contains($rendered_output, 'No published blog posts are currently eligible for backfill.'),
+    'Expected safe fallback messaging when no published blog posts are eligible for manual backfill.'
+);
+
+$wpdb->eligible_posts_count = 4;
+ob_start();
+$page->render();
+$rendered_output_with_posts = (string) ob_get_clean();
+
+$assert(
+    str_contains($rendered_output_with_posts, '<button type="submit" class="button button-primary">Run Now</button>'),
+    'Expected Run Now scanner button to be enabled when eligible published posts exist.'
+);
+
 $_POST = array(
     '_wpnonce' => 'nonce-clicklink_save_mapping',
     'keyword' => '  Summer   Sale  ',
@@ -499,6 +559,42 @@ $latest_redirect = end($clicklink_test_redirects);
 $assert(
     is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
     'Expected nonce failures to redirect with invalid_nonce notice.'
+);
+
+$wpdb->eligible_posts_count = 0;
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_start',
+);
+$page->handle_start_scan();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=scan_no_posts'),
+    'Expected manual scan start action to safely fallback when no posts are eligible.'
+);
+
+$wpdb->eligible_posts_count = 3;
+$_POST = array(
+    '_wpnonce' => 'bad-nonce',
+);
+$page->handle_start_scan();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=invalid_nonce'),
+    'Expected manual scan start action to enforce nonce validation.'
+);
+
+$wpdb->eligible_posts_count = 3;
+$_POST = array(
+    '_wpnonce' => 'nonce-clicklink_backfill_start',
+);
+$page->handle_start_scan();
+$latest_redirect = end($clicklink_test_redirects);
+
+$assert(
+    is_string($latest_redirect) && str_contains($latest_redirect, 'clicklink_notice=scan_started'),
+    'Expected manual scan start action to initialize run state when eligible posts exist.'
 );
 
 $_POST = array(

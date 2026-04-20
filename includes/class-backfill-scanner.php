@@ -70,6 +70,11 @@ final class Backfill_Scanner
         return $normalized_state;
     }
 
+    public function current_eligible_posts(): int
+    {
+        return $this->count_eligible_posts();
+    }
+
     /**
      * @return array{
      *   status: string,

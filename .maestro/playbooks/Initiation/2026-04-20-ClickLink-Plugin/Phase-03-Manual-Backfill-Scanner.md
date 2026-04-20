@@ -22,10 +22,14 @@ This phase adds a manual “Run Now” scanner that processes older blog posts w
     - Persisted run metadata for admin visibility: `started_at`, `completed_at`, `processed_posts`, `changed_posts`, `inserted_links`, `failures`, `last_error`, `batch_size`, and `total_eligible_posts`.
     - Extended `Post_Save_Linker` with reusable `process_post()` orchestration entrypoint so scanner runs reuse the existing save-time linker/statistics behavior; verified idempotent reruns do not create duplicate links.
 
-- [ ] Build admin “Run Now” control surface:
+- [x] Build admin “Run Now” control surface:
   - Add a dedicated ClickLink admin screen section with start button, run summary, and current status
   - Provide clear counters for scanned posts, changed posts, inserted links, and remaining posts
   - Protect all actions with capability checks and nonces, and handle safe fallback when no posts are eligible
+  - Completion notes (2026-04-20, loop 00001):
+    - Added a `Manual Backfill Scanner` panel to the ClickLink admin page with a nonce-protected `Run Now` control, current status label, run timestamps, and summary counters for scanned posts, changed posts, inserted links, and remaining posts.
+    - Implemented admin-post start handling (`clicklink_backfill_start`) with capability + nonce checks and guarded redirects for already-running runs, successful run initialization, and start failures.
+    - Added safe no-eligible-post fallback behavior by exposing `Backfill_Scanner::current_eligible_posts()` and using it to disable `Run Now`, show operator guidance, and prevent start attempts when no published blog posts are available.
 
 - [ ] Add manual execution endpoints (no scheduler):
   - Implement secure AJAX/admin-post endpoints for `start`, `next-batch`, and `cancel/reset` actions

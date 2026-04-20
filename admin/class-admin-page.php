@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ClickLink\Admin;
 
+use ClickLink\Backfill_Scanner;
 use ClickLink\Installer;
 use ClickLink\Keyword_Mapping_Repository;
 
@@ -13,14 +14,20 @@ final class Admin_Page
     public const MENU_SLUG = 'clicklink';
     private const SAVE_ACTION = 'clicklink_save_mapping';
     private const DELETE_ACTION = 'clicklink_delete_mapping';
+    private const START_SCAN_ACTION = 'clicklink_backfill_start';
     private const SAVE_NONCE_ACTION = 'clicklink_save_mapping';
     private const DELETE_NONCE_ACTION = 'clicklink_delete_mapping';
+    private const START_SCAN_NONCE_ACTION = 'clicklink_backfill_start';
     private const NOTICE_QUERY_KEY = 'clicklink_notice';
     private Keyword_Mapping_Repository $mapping_repository;
+    private ?Backfill_Scanner $backfill_scanner;
 
-    public function __construct(?Keyword_Mapping_Repository $mapping_repository = null)
-    {
+    public function __construct(
+        ?Keyword_Mapping_Repository $mapping_repository = null,
+        ?Backfill_Scanner $backfill_scanner = null
+    ) {
         $this->mapping_repository = $mapping_repository ?? new Keyword_Mapping_Repository();
+        $this->backfill_scanner = $backfill_scanner;
     }
 
     public function register(): void
@@ -32,6 +39,7 @@ final class Admin_Page
         add_action('admin_menu', array($this, 'register_menu'));
         add_action('admin_post_' . self::SAVE_ACTION, array($this, 'handle_save_mapping'));
         add_action('admin_post_' . self::DELETE_ACTION, array($this, 'handle_delete_mapping'));
+        add_action('admin_post_' . self::START_SCAN_ACTION, array($this, 'handle_start_scan'));
     }
 
     public function register_menu(): void
@@ -67,6 +75,7 @@ final class Admin_Page
         echo '<h1>' . self::escape(self::translate('ClickLink')) . '</h1>';
         echo '<p>' . self::escape(self::translate('Manage keyword-to-URL mappings used by ClickLink auto-linking. Duplicate keywords are allowed.')) . '</p>';
         $this->render_notice();
+        $this->render_backfill_scanner_panel();
         $this->render_form($edit_mapping);
         $this->render_mappings_table();
         echo '</div>';
@@ -146,6 +155,93 @@ final class Admin_Page
         }
 
         $this->redirect_with_notice('db_error');
+    }
+
+    public function handle_start_scan(): void
+    {
+        if (! self::can_manage()) {
+            $this->deny_access();
+            return;
+        }
+
+        if (! $this->verify_nonce(self::START_SCAN_NONCE_ACTION)) {
+            $this->redirect_with_notice('invalid_nonce');
+            return;
+        }
+
+        $scanner = $this->backfill_scanner();
+        $state = $scanner->get_state();
+
+        if (($state['status'] ?? '') === 'running') {
+            $this->redirect_with_notice('scan_already_running');
+            return;
+        }
+
+        if ($scanner->current_eligible_posts() <= 0) {
+            $this->redirect_with_notice('scan_no_posts');
+            return;
+        }
+
+        $started_state = $scanner->start_run();
+
+        if (($started_state['status'] ?? '') === 'running') {
+            $this->redirect_with_notice('scan_started');
+            return;
+        }
+
+        $this->redirect_with_notice('scan_start_failed');
+    }
+
+    private function render_backfill_scanner_panel(): void
+    {
+        $scanner = $this->backfill_scanner();
+        $state = $scanner->get_state();
+        $status = self::scalar_string($state['status'] ?? 'pending');
+        $processed_posts = self::non_negative_int($state['processed_posts'] ?? 0);
+        $changed_posts = self::non_negative_int($state['changed_posts'] ?? 0);
+        $inserted_links = self::non_negative_int($state['inserted_links'] ?? 0);
+        $state_total_eligible_posts = self::non_negative_int($state['total_eligible_posts'] ?? 0);
+        $current_eligible_posts = max(0, $scanner->current_eligible_posts());
+        $started_at = self::scalar_string($state['started_at'] ?? '');
+        $completed_at = self::scalar_string($state['completed_at'] ?? '');
+
+        $display_total_eligible_posts = $state_total_eligible_posts;
+
+        if ($display_total_eligible_posts <= 0 || $status === 'pending' || $status === 'error') {
+            $display_total_eligible_posts = $current_eligible_posts;
+        }
+
+        $remaining_posts = max(0, $display_total_eligible_posts - $processed_posts);
+        $scan_in_progress = $status === 'running';
+        $can_start_scan = ! $scan_in_progress && $current_eligible_posts > 0;
+        $start_button_disabled_attr = $can_start_scan ? '' : ' disabled';
+
+        echo '<hr />';
+        echo '<h2>' . self::escape(self::translate('Manual Backfill Scanner')) . '</h2>';
+        echo '<p>' . self::escape(self::translate('Run a manual scan of published blog posts using the same linking rules used on save.')) . '</p>';
+        echo '<table class="widefat striped" role="presentation">';
+        echo '<tbody>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Current status')) . '</th><td>' . self::escape($this->status_label($status)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Run started')) . '</th><td>' . self::escape($this->display_timestamp($started_at)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Run completed')) . '</th><td>' . self::escape($this->display_timestamp($completed_at)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Scanned posts')) . '</th><td>' . self::escape(self::format_number($processed_posts)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Changed posts')) . '</th><td>' . self::escape(self::format_number($changed_posts)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Inserted links')) . '</th><td>' . self::escape(self::format_number($inserted_links)) . '</td></tr>';
+        echo '<tr><th scope="row">' . self::escape(self::translate('Remaining posts')) . '</th><td>' . self::escape(self::format_number($remaining_posts)) . '</td></tr>';
+        echo '</tbody>';
+        echo '</table>';
+
+        if ($current_eligible_posts <= 0 && ! $scan_in_progress) {
+            echo '<p>' . self::escape(self::translate('No published blog posts are currently eligible for backfill.')) . '</p>';
+        }
+
+        echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
+        echo '<input type="hidden" name="action" value="' . self::escape_attr(self::START_SCAN_ACTION) . '">';
+        echo self::nonce_field(self::START_SCAN_NONCE_ACTION);
+        echo '<p class="submit"><button type="submit" class="button button-primary"' . $start_button_disabled_attr . '>';
+        echo self::escape(self::translate('Run Now'));
+        echo '</button></p>';
+        echo '</form>';
     }
 
     /**
@@ -254,6 +350,10 @@ final class Admin_Page
             'created' => array('class' => 'notice-success', 'message' => self::translate('Mapping added.')),
             'updated' => array('class' => 'notice-success', 'message' => self::translate('Mapping updated.')),
             'deleted' => array('class' => 'notice-success', 'message' => self::translate('Mapping deleted.')),
+            'scan_started' => array('class' => 'notice-success', 'message' => self::translate('Manual backfill run initialized.')),
+            'scan_already_running' => array('class' => 'notice-warning', 'message' => self::translate('A manual backfill run is already in progress.')),
+            'scan_no_posts' => array('class' => 'notice-info', 'message' => self::translate('No published blog posts are currently eligible for backfill.')),
+            'scan_start_failed' => array('class' => 'notice-error', 'message' => self::translate('Unable to start manual backfill run. Please try again.')),
             'invalid_input' => array('class' => 'notice-error', 'message' => self::translate('Keyword and a valid URL are required.')),
             'invalid_nonce' => array('class' => 'notice-error', 'message' => self::translate('Security check failed. Please try again.')),
             'not_found' => array('class' => 'notice-error', 'message' => self::translate('The selected mapping no longer exists.')),
@@ -460,6 +560,15 @@ final class Admin_Page
         }
     }
 
+    private function backfill_scanner(): Backfill_Scanner
+    {
+        if ($this->backfill_scanner === null) {
+            $this->backfill_scanner = new Backfill_Scanner();
+        }
+
+        return $this->backfill_scanner;
+    }
+
     private static function can_manage(): bool
     {
         return function_exists('current_user_can') && current_user_can(self::CAPABILITY);
@@ -544,6 +653,72 @@ final class Admin_Page
         }
 
         return (int) $validated;
+    }
+
+    private static function non_negative_int($value): int
+    {
+        if (! is_scalar($value) || $value === '') {
+            return 0;
+        }
+
+        $validated = filter_var(
+            (string) $value,
+            FILTER_VALIDATE_INT,
+            array(
+                'options' => array(
+                    'min_range' => 0,
+                ),
+            )
+        );
+
+        if ($validated === false) {
+            return 0;
+        }
+
+        return (int) $validated;
+    }
+
+    private static function scalar_string($value): string
+    {
+        if (! is_scalar($value)) {
+            return '';
+        }
+
+        return trim((string) $value);
+    }
+
+    private static function format_number(int $value): string
+    {
+        if (function_exists('number_format_i18n')) {
+            return number_format_i18n($value);
+        }
+
+        return number_format($value);
+    }
+
+    private function status_label(string $status): string
+    {
+        $labels = array(
+            'pending' => self::translate('Pending'),
+            'running' => self::translate('Running'),
+            'completed' => self::translate('Completed'),
+            'error' => self::translate('Error'),
+        );
+
+        if (! isset($labels[$status])) {
+            return self::translate('Pending');
+        }
+
+        return $labels[$status];
+    }
+
+    private function display_timestamp(string $timestamp): string
+    {
+        if ($timestamp === '') {
+            return self::translate('Not set');
+        }
+
+        return $timestamp;
     }
 
     private static function translate(string $value): string
