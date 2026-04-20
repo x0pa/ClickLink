@@ -5,6 +5,7 @@ declare(strict_types=1);
 final class ClickLink_Test_Focused_WPDB
 {
     public string $prefix = 'wp_';
+    public int $get_results_calls = 0;
 
     /**
      * @var array<int, array{keyword: string, url: string}>
@@ -16,6 +17,8 @@ final class ClickLink_Test_Focused_WPDB
      */
     public function get_results(string $query, string $output = 'OBJECT'): array
     {
+        $this->get_results_calls++;
+
         return $this->mappings;
     }
 }
@@ -195,6 +198,7 @@ $wpdb = new ClickLink_Test_Focused_WPDB();
 
 require_once __DIR__ . '/fixtures/linker-content.php';
 require_once __DIR__ . '/../includes/class-installer.php';
+require_once __DIR__ . '/../includes/class-keyword-mapping-repository.php';
 require_once __DIR__ . '/../includes/class-linker-stats.php';
 require_once __DIR__ . '/../includes/class-post-save-linker.php';
 
@@ -213,6 +217,7 @@ $reset_environment = static function (): void {
     global $clicklink_test_revision_ids;
     global $clicklink_test_updates;
     global $clicklink_test_rand_sequence;
+    global $wpdb;
 
     $clicklink_test_options = array(
         'clicklink_options' => array(
@@ -224,6 +229,10 @@ $reset_environment = static function (): void {
     $clicklink_test_revision_ids = array();
     $clicklink_test_updates = array();
     $clicklink_test_rand_sequence = array();
+
+    if (is_object($wpdb) && property_exists($wpdb, 'get_results_calls')) {
+        $wpdb->get_results_calls = 0;
+    }
 };
 
 $run_save = static function (\ClickLink\Post_Save_Linker $linker, int $post_id, string $content, bool $update): string {
@@ -259,6 +268,7 @@ $assert(
 );
 
 $reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
 $wpdb->mappings = array(
     array('keyword' => 'art', 'url' => 'https://example.com/art'),
 );
@@ -285,6 +295,7 @@ $assert(
 );
 
 $reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
 $wpdb->mappings = array(
     array('keyword' => 'apple', 'url' => 'https://example.com/apple-a'),
     array('keyword' => 'apple', 'url' => 'https://example.com/apple-b'),
@@ -308,6 +319,48 @@ $assert(
 );
 
 $reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
+$wpdb->mappings = array(
+    array('keyword' => '  APPLE  ', 'url' => 'https://example.com/apple-a'),
+    array('keyword' => 'apple', 'url' => 'https://example.com/apple-a'),
+    array('keyword' => 'Apple', 'url' => 'https://example.com/apple-b'),
+    array('keyword' => '', 'url' => 'https://example.com/skip-empty-keyword'),
+    array('keyword' => 'apple', 'url' => 'not-a-valid-url'),
+    array('keyword' => 'banana', 'url' => ''),
+);
+$clicklink_test_rand_sequence = array(1, 0);
+
+$hardened_mapping_content = '<p>apple apple</p>';
+$updated_hardened_mapping_content = $run_save($linker, 2602, $hardened_mapping_content, false);
+$hardened_a_count = preg_match_all('/href="https:\/\/example\.com\/apple-a"/', $updated_hardened_mapping_content, $hardened_a_matches);
+$hardened_b_count = preg_match_all('/href="https:\/\/example\.com\/apple-b"/', $updated_hardened_mapping_content, $hardened_b_matches);
+
+$assert(
+    $hardened_b_count === 1,
+    'Expected keyword matching to normalize case/spacing while still honoring unique URL pools per keyword.'
+);
+$assert(
+    $hardened_a_count === 1,
+    'Expected duplicate rows and invalid mapping rows to be ignored safely without breaking link insertion.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
+$wpdb->mappings = array(
+    array('keyword' => 'cache', 'url' => 'https://example.com/cache'),
+);
+
+$cache_content = '<p>cache</p>';
+$run_save($linker, 2701, $cache_content, false);
+$run_save($linker, 2702, $cache_content, false);
+
+$assert(
+    $wpdb->get_results_calls === 1,
+    'Expected grouped keyword mappings to be cached per linker instance to avoid repeated mapping-table reads.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
 $clicklink_test_options['clicklink_options']['max_links_per_post'] = 10;
 $wpdb->mappings = array(
     array('keyword' => 'apple', 'url' => 'https://example.com/apple'),
@@ -343,6 +396,7 @@ $assert(
 );
 
 $reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
 $clicklink_test_options['clicklink_options']['max_links_per_post'] = 3;
 $wpdb->mappings = array(
     array('keyword' => 'apple', 'url' => 'https://example.com/apple'),

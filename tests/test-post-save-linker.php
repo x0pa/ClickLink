@@ -205,6 +205,7 @@ $wpdb = new ClickLink_Test_Linker_WPDB();
 
 require_once __DIR__ . '/fixtures/linker-content.php';
 require_once __DIR__ . '/../includes/class-installer.php';
+require_once __DIR__ . '/../includes/class-keyword-mapping-repository.php';
 require_once __DIR__ . '/../includes/class-linker-stats.php';
 require_once __DIR__ . '/../includes/class-post-save-linker.php';
 

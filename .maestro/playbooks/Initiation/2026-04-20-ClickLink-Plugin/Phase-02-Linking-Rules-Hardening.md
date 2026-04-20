@@ -14,10 +14,16 @@ This phase converts the prototype linker into a production-safe content transfor
     - Confirmed helper duplication risk is already visible in `normalize_keyword()` and `sanitize_url()` across linker/admin modules; Phase 02 should centralize these rather than introduce parallel implementations.
     - Confirmed single-site assumptions remain explicit (`Network: false` plugin header, `Compatibility::is_multisite()` gate, multisite activation rejection/deactivation path in lifecycle).
 
-- [ ] Strengthen mapping retrieval and normalization pipeline:
+- [x] Strengthen mapping retrieval and normalization pipeline:
   - Refactor mapping reads into a dedicated repository/service with cached grouped keyword collections
   - Normalize keyword matching inputs (trim/case strategy) while preserving original display values in admin UI
   - Add safe handling for duplicate rows, invalid/empty rows, and URL validation failures without breaking save flow
+  - Completion notes (2026-04-20, loop 00001):
+    - Added `includes/class-keyword-mapping-repository.php` and refactored `Post_Save_Linker` plus `Admin_Page` mapping reads to use the shared repository service.
+    - Implemented cached grouped keyword collections for linker matching, with duplicate keyword+URL row deduplication and safe skipping of empty/invalid keyword or URL rows.
+    - Centralized normalization helpers (`normalize_keyword_for_storage`, `normalize_keyword_for_matching`, `sanitize_url`) and updated admin save behavior to preserve display casing while still trimming/collapsing/sanitizing.
+    - Wired a shared repository instance through `Plugin` and invalidated grouped cache after admin mapping insert/update/delete operations.
+    - Expanded regression coverage in `tests/test-linker-focused.php`, `tests/test-admin-page.php`, and `tests/test-prototype-smoke.php`; full suite passed via `./tests/run-tests.sh`.
 
 - [ ] Implement robust paragraph-only HTML traversal and exclusion logic:
   - Parse and walk post HTML so replacements occur only within paragraph/body text nodes

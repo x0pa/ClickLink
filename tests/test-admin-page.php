@@ -374,6 +374,7 @@ global $wpdb;
 $wpdb = new ClickLink_Test_Admin_WPDB();
 
 require_once __DIR__ . '/../includes/class-installer.php';
+require_once __DIR__ . '/../includes/class-keyword-mapping-repository.php';
 require_once __DIR__ . '/../admin/class-admin-page.php';
 
 $failures = array();
@@ -434,8 +435,8 @@ $inserted_row = array_values($wpdb->rows)[0] ?? null;
 $latest_redirect = end($clicklink_test_redirects);
 
 $assert(
-    is_array($inserted_row) && ($inserted_row['keyword'] ?? '') === 'summer sale',
-    'Expected keyword normalization (trim, collapse spaces, lowercase) on insert.'
+    is_array($inserted_row) && ($inserted_row['keyword'] ?? '') === 'Summer Sale',
+    'Expected keyword normalization to trim/collapse spacing while preserving display casing on insert.'
 );
 $assert(
     is_array($inserted_row) && ($inserted_row['url'] ?? '') === 'https://example.com/deals',
@@ -457,8 +458,8 @@ $page->handle_save_mapping();
 $latest_redirect = end($clicklink_test_redirects);
 
 $assert(
-    ($wpdb->rows[$mapping_id]['keyword'] ?? '') === 'summer sale',
-    'Expected update flow to keep normalized keyword values.'
+    ($wpdb->rows[$mapping_id]['keyword'] ?? '') === 'SUMMER SALE',
+    'Expected update flow to preserve submitted keyword casing in stored admin values.'
 );
 $assert(
     ($wpdb->rows[$mapping_id]['url'] ?? '') === 'https://example.com/new',

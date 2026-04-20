@@ -706,8 +706,8 @@ $assert(
     'Expected smoke path to persist two sample keyword mappings.'
 );
 $assert(
-    array_column(array_values($wpdb->mappings), 'keyword') === array('apple', 'apple'),
-    'Expected admin save flow to normalize stored keywords to lowercase.'
+    array_column(array_values($wpdb->mappings), 'keyword') === array('Apple', 'Apple'),
+    'Expected admin save flow to preserve display casing in stored keywords.'
 );
 $assert(
     count($clicklink_test_redirects) === 2

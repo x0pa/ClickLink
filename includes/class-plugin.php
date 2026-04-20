@@ -12,6 +12,7 @@ final class Plugin
     private static ?self $instance = null;
     private ?Admin_Page $admin_page = null;
     private ?Dashboard_Widget $dashboard_widget = null;
+    private ?Keyword_Mapping_Repository $mapping_repository = null;
     private ?Linker_Stats $linker_stats = null;
     private ?Post_Save_Linker $post_save_linker = null;
 
@@ -40,12 +41,13 @@ final class Plugin
 
         Installer::maybe_upgrade();
 
+        $this->mapping_repository = new Keyword_Mapping_Repository();
         $this->linker_stats = new Linker_Stats();
-        $this->post_save_linker = new Post_Save_Linker($this->linker_stats);
+        $this->post_save_linker = new Post_Save_Linker($this->linker_stats, $this->mapping_repository);
         $this->post_save_linker->register();
 
         if (function_exists('is_admin') && is_admin()) {
-            $this->admin_page = new Admin_Page();
+            $this->admin_page = new Admin_Page($this->mapping_repository);
             $this->admin_page->register();
 
             $this->dashboard_widget = new Dashboard_Widget($this->linker_stats);

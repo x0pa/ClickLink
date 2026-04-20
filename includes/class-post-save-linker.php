@@ -10,15 +10,20 @@ final class Post_Save_Linker
     private const OPTIONS_OPTION_KEY = 'clicklink_options';
 
     private Linker_Stats $stats;
+    private Keyword_Mapping_Repository $mapping_repository;
 
     /**
      * @var array<int, bool>
      */
     private array $active_updates = array();
 
-    public function __construct(?Linker_Stats $stats = null)
+    public function __construct(
+        ?Linker_Stats $stats = null,
+        ?Keyword_Mapping_Repository $mapping_repository = null
+    )
     {
         $this->stats = $stats ?? new Linker_Stats();
+        $this->mapping_repository = $mapping_repository ?? new Keyword_Mapping_Repository();
     }
 
     public function register(): void
@@ -68,7 +73,7 @@ final class Post_Save_Linker
             return;
         }
 
-        $mappings = $this->fetch_keyword_mappings();
+        $mappings = $this->mapping_repository->fetch_grouped_keyword_urls();
 
         if ($mappings === array()) {
             $this->persist_content_hash($post_id, $current_hash);
@@ -171,51 +176,6 @@ final class Post_Save_Linker
     private function content_hash(string $content): string
     {
         return hash('sha256', str_replace("\r\n", "\n", $content));
-    }
-
-    /**
-     * @return array<string, array<int, string>>
-     */
-    private function fetch_keyword_mappings(): array
-    {
-        global $wpdb;
-
-        if (! is_object($wpdb) || ! method_exists($wpdb, 'get_results')) {
-            return array();
-        }
-
-        $table_name = Installer::table_name();
-        $results = $wpdb->get_results(
-            "SELECT keyword, url FROM {$table_name} WHERE keyword <> '' AND url <> '' ORDER BY keyword ASC, id ASC",
-            'ARRAY_A'
-        );
-
-        if (! is_array($results)) {
-            return array();
-        }
-
-        $mappings = array();
-
-        foreach ($results as $result) {
-            if (! is_array($result)) {
-                continue;
-            }
-
-            $keyword = $this->normalize_keyword((string) ($result['keyword'] ?? ''));
-            $url = $this->sanitize_url((string) ($result['url'] ?? ''));
-
-            if ($keyword === '' || $url === '') {
-                continue;
-            }
-
-            if (! isset($mappings[$keyword])) {
-                $mappings[$keyword] = array();
-            }
-
-            $mappings[$keyword][] = $url;
-        }
-
-        return $mappings;
     }
 
     private function max_links_per_post(): int
@@ -528,45 +488,6 @@ final class Post_Save_Linker
         }
 
         return (string) $urls[$selected_index];
-    }
-
-    private function normalize_keyword(string $keyword): string
-    {
-        $keyword = trim($keyword);
-        $keyword = preg_replace('/\s+/', ' ', $keyword) ?? $keyword;
-
-        if (function_exists('sanitize_text_field')) {
-            $keyword = sanitize_text_field($keyword);
-        } else {
-            $keyword = trim(strip_tags($keyword));
-        }
-
-        if (function_exists('mb_strtolower')) {
-            return mb_strtolower($keyword);
-        }
-
-        return strtolower($keyword);
-    }
-
-    private function sanitize_url(string $url): string
-    {
-        $url = trim($url);
-
-        if (function_exists('esc_url_raw')) {
-            $url = esc_url_raw($url);
-        } else {
-            $url = (string) filter_var($url, FILTER_SANITIZE_URL);
-        }
-
-        if ($url === '') {
-            return '';
-        }
-
-        if (function_exists('wp_http_validate_url')) {
-            return wp_http_validate_url($url) ? $url : '';
-        }
-
-        return filter_var($url, FILTER_VALIDATE_URL) !== false ? $url : '';
     }
 
     private function escape_url_attr(string $url): string

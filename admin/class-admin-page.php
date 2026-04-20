@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ClickLink\Admin;
 
 use ClickLink\Installer;
+use ClickLink\Keyword_Mapping_Repository;
 
 final class Admin_Page
 {
@@ -15,6 +16,12 @@ final class Admin_Page
     private const SAVE_NONCE_ACTION = 'clicklink_save_mapping';
     private const DELETE_NONCE_ACTION = 'clicklink_delete_mapping';
     private const NOTICE_QUERY_KEY = 'clicklink_notice';
+    private Keyword_Mapping_Repository $mapping_repository;
+
+    public function __construct(?Keyword_Mapping_Repository $mapping_repository = null)
+    {
+        $this->mapping_repository = $mapping_repository ?? new Keyword_Mapping_Repository();
+    }
 
     public function register(): void
     {
@@ -78,8 +85,8 @@ final class Admin_Page
         }
 
         $mapping_id = self::positive_int(self::request_post('mapping_id'));
-        $keyword = self::normalize_keyword(self::request_post('keyword'));
-        $url = self::sanitize_url(self::request_post('url'));
+        $keyword = Keyword_Mapping_Repository::normalize_keyword_for_storage(self::request_post('keyword'));
+        $url = Keyword_Mapping_Repository::sanitize_url(self::request_post('url'));
 
         if ($keyword === '' || $url === '') {
             $this->redirect_with_notice('invalid_input');
@@ -269,39 +276,7 @@ final class Admin_Page
      */
     private function fetch_mappings(): array
     {
-        global $wpdb;
-
-        if (! is_object($wpdb) || ! method_exists($wpdb, 'get_results')) {
-            return array();
-        }
-
-        $table_name = Installer::table_name();
-        $results = $wpdb->get_results(
-            "SELECT id, keyword, url, created_at, updated_at FROM {$table_name} ORDER BY keyword ASC, id ASC",
-            'ARRAY_A'
-        );
-
-        if (! is_array($results)) {
-            return array();
-        }
-
-        $mappings = array();
-
-        foreach ($results as $result) {
-            if (! is_array($result)) {
-                continue;
-            }
-
-            $mappings[] = array(
-                'id' => self::positive_int((string) ($result['id'] ?? '0')),
-                'keyword' => (string) ($result['keyword'] ?? ''),
-                'url' => (string) ($result['url'] ?? ''),
-                'created_at' => (string) ($result['created_at'] ?? ''),
-                'updated_at' => (string) ($result['updated_at'] ?? ''),
-            );
-        }
-
-        return $mappings;
+        return $this->mapping_repository->fetch_mappings();
     }
 
     /**
@@ -319,60 +294,12 @@ final class Admin_Page
             return null;
         }
 
-        global $wpdb;
-
-        if (! is_object($wpdb) || ! method_exists($wpdb, 'get_row')) {
-            return null;
-        }
-
-        $table_name = Installer::table_name();
-        $query = "SELECT id, keyword, url FROM {$table_name} WHERE id = {$mapping_id}";
-
-        if (method_exists($wpdb, 'prepare')) {
-            $query = (string) $wpdb->prepare(
-                "SELECT id, keyword, url FROM {$table_name} WHERE id = %d",
-                $mapping_id
-            );
-        }
-
-        $result = $wpdb->get_row($query, 'ARRAY_A');
-
-        if (! is_array($result)) {
-            return null;
-        }
-
-        return array(
-            'id' => self::positive_int((string) ($result['id'] ?? '0')),
-            'keyword' => (string) ($result['keyword'] ?? ''),
-            'url' => (string) ($result['url'] ?? ''),
-        );
+        return $this->mapping_repository->fetch_mapping_by_id($mapping_id);
     }
 
     private function mapping_exists(int $mapping_id): bool
     {
-        if ($mapping_id <= 0) {
-            return false;
-        }
-
-        global $wpdb;
-
-        if (! is_object($wpdb) || ! method_exists($wpdb, 'get_row')) {
-            return false;
-        }
-
-        $table_name = Installer::table_name();
-        $query = "SELECT id FROM {$table_name} WHERE id = {$mapping_id}";
-
-        if (method_exists($wpdb, 'prepare')) {
-            $query = (string) $wpdb->prepare(
-                "SELECT id FROM {$table_name} WHERE id = %d",
-                $mapping_id
-            );
-        }
-
-        $result = $wpdb->get_row($query, 'ARRAY_A');
-
-        return is_array($result);
+        return $this->mapping_repository->mapping_exists($mapping_id);
     }
 
     private function insert_mapping(string $keyword, string $url): bool
@@ -396,7 +323,13 @@ final class Admin_Page
             array('%s', '%s', '%s', '%s')
         );
 
-        return $result !== false;
+        if ($result === false) {
+            return false;
+        }
+
+        $this->mapping_repository->invalidate_grouped_cache();
+
+        return true;
     }
 
     private function update_mapping(int $mapping_id, string $keyword, string $url): bool
@@ -421,7 +354,13 @@ final class Admin_Page
             array('%d')
         );
 
-        return $result !== false;
+        if ($result === false) {
+            return false;
+        }
+
+        $this->mapping_repository->invalidate_grouped_cache();
+
+        return true;
     }
 
     private function delete_mapping(int $mapping_id): bool
@@ -440,7 +379,13 @@ final class Admin_Page
             array('%d')
         );
 
-        return $result !== false;
+        if ($result === false) {
+            return false;
+        }
+
+        $this->mapping_repository->invalidate_grouped_cache();
+
+        return true;
     }
 
     private static function current_datetime(): string
@@ -454,45 +399,6 @@ final class Admin_Page
         }
 
         return gmdate('Y-m-d H:i:s');
-    }
-
-    private static function normalize_keyword(string $keyword): string
-    {
-        $keyword = trim($keyword);
-        $keyword = preg_replace('/\s+/', ' ', $keyword) ?? $keyword;
-
-        if (function_exists('sanitize_text_field')) {
-            $keyword = sanitize_text_field($keyword);
-        } else {
-            $keyword = trim(strip_tags($keyword));
-        }
-
-        if (function_exists('mb_strtolower')) {
-            return mb_strtolower($keyword);
-        }
-
-        return strtolower($keyword);
-    }
-
-    private static function sanitize_url(string $url): string
-    {
-        $url = trim($url);
-
-        if (function_exists('esc_url_raw')) {
-            $url = esc_url_raw($url);
-        } else {
-            $url = (string) filter_var($url, FILTER_SANITIZE_URL);
-        }
-
-        if ($url === '') {
-            return '';
-        }
-
-        if (function_exists('wp_http_validate_url')) {
-            return wp_http_validate_url($url) ? $url : '';
-        }
-
-        return filter_var($url, FILTER_VALIDATE_URL) !== false ? $url : '';
     }
 
     private function verify_nonce(string $action): bool
