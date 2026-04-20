@@ -40,7 +40,8 @@ This phase creates a fully runnable ClickLink plugin baseline that installs clea
   - Keep tests isolated and deterministic with reusable fixtures for sample post content
   - Completion note (2026-04-20, loop 00001): Added reusable sample-content fixtures in `tests/fixtures/linker-content.php`, introduced focused linker coverage in `test-linker-focused.php` for boundary matching/random URL selection constraints/paragraph scoping/post-level cap behavior, and expanded installer validation to assert activation-path schema+default initialization; updated `tests/run-tests.sh` and confirmed full suite + syntax checks pass.
 
-- [ ] Run verification and produce a working prototype handoff state:
+- [x] Run verification and produce a working prototype handoff state:
   - Execute lint/syntax and test commands (`php -l`, PHPUnit/WordPress test runner if configured) and fix failures
   - Perform a local smoke path: activate plugin, add sample mappings, save a sample post, and confirm links/stats appear
   - Leave the plugin in a runnable state with clear in-code defaults so the next phase can build directly on this baseline
+  - Completion note (2026-04-20, loop 00001): Ran repository-wide `php -l` checks and full `tests/run-tests.sh` suite (all passing), added deterministic `tests/test-prototype-smoke.php` to validate activation + mapping creation + post-save auto-linking + dashboard stats rendering in one flow, and wired it into `tests/run-tests.sh` to keep the runnable baseline continuously verifiable for Phase 02 handoff.
