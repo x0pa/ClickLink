@@ -672,6 +672,10 @@ $assert(
     'Expected Plugin::run() to register admin save-mapping handler in admin context.'
 );
 $assert(
+    isset($clicklink_test_actions['admin_post_clicklink_backfill_start']),
+    'Expected Plugin::run() to register manual backfill start handler in admin context.'
+);
+$assert(
     isset($clicklink_test_actions['save_post_post']),
     'Expected Plugin::run() to register post-save linker handler.'
 );

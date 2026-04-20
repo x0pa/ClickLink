@@ -535,6 +535,39 @@ $assert(
 
 $reset_environment();
 $scanner = new \ClickLink\Backfill_Scanner();
+
+$post_one_original_content = (string) ($clicklink_test_posts[1]['post_content'] ?? '');
+$post_four_original_content = (string) ($clicklink_test_posts[4]['post_content'] ?? '');
+update_post_meta(1, '_clicklink_content_hash', hash('sha256', str_replace("\r\n", "\n", $post_one_original_content)));
+update_post_meta(4, '_clicklink_content_hash', hash('sha256', str_replace("\r\n", "\n", $post_four_original_content)));
+
+$scanner->start_run(3);
+$hash_bypass_state = $scanner->process_next_batch();
+
+$assert(
+    $hash_bypass_state['status'] === 'completed',
+    'Expected backfill batch to complete in one pass when batch size covers all eligible posts.'
+);
+$assert(
+    $hash_bypass_state['changed_posts'] === 2 && $hash_bypass_state['inserted_links'] === 3,
+    'Expected backfill processing to bypass save-event hash short-circuiting and still run shared linker rules.'
+);
+$assert(
+    $count_link_matches((string) ($clicklink_test_posts[1]['post_content'] ?? '')) === 2
+        && $count_link_matches((string) ($clicklink_test_posts[4]['post_content'] ?? '')) === 1,
+    'Expected hashed published posts to still receive eligible paragraph links during manual backfill.'
+);
+
+$global_stats_after_hashed_backfill = get_option('clicklink_stats', array());
+$assert(
+    is_array($global_stats_after_hashed_backfill)
+        && (int) ($global_stats_after_hashed_backfill['total_links_inserted'] ?? -1) === 3
+        && (int) ($global_stats_after_hashed_backfill['posts_touched'] ?? -1) === 2,
+    'Expected hashed-content backfill runs to keep updating shared global stats through Linker_Stats.'
+);
+
+$reset_environment();
+$scanner = new \ClickLink\Backfill_Scanner();
 $scanner->start_run(2);
 $scanner->process_next_batch();
 $clicklink_test_get_post_fail_ids = array(4);

@@ -41,10 +41,15 @@ This phase adds a manual “Run Now” scanner that processes older blog posts w
     - Hardened `Backfill_Scanner` execution for partial-failure resilience by persisting state after each processed post, adding explicit reset support, handling remaining-post lookup failures as `error` (instead of false completion), and capping requested batch sizes with timeout-aware limits.
     - Kept execution manual-only with no cron/scheduler registration added anywhere in plugin bootstrap or admin wiring.
 
-- [ ] Integrate scanner with shared linker/statistics pipeline:
+- [x] Integrate scanner with shared linker/statistics pipeline:
   - Route each scanned post through the same paragraph-only linker engine used on save
   - Reuse max-links-per-post and random URL selection rules consistently across save and backfill flows
   - Update global and per-run stats in one place to keep dashboard numbers accurate
+  - Completion notes (2026-04-20, loop 00001):
+    - Updated `Backfill_Scanner` to route each batch item through shared `Post_Save_Linker::process_post()` in backfill mode (`$update=false`) so manual scans always execute the same paragraph-only matcher/link-cap/random-URL rules rather than save-event hash short-circuiting.
+    - Centralized per-run counter aggregation in scanner state via `record_link_result()` while keeping global totals sourced from the shared `Linker_Stats::record_save_metrics()` path invoked by `Post_Save_Linker`.
+    - Wired plugin bootstrap to inject the same `Post_Save_Linker` instance into `Backfill_Scanner` (`Plugin::run()` -> `Admin_Page`) so save and backfill flows share one linker/statistics orchestration service.
+    - Added regression coverage in `tests/test-backfill-scanner.php` for hashed-content backfill processing and verified global stats correctness; extended `tests/test-prototype-smoke.php` to assert plugin-level manual backfill handler registration.
 
 - [ ] Create automated tests for scan workflow and endpoints:
   - Add tests for batch cursor progression, completion state, cancellation/reset, and no-op runs

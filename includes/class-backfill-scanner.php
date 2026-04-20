@@ -190,7 +190,7 @@ final class Backfill_Scanner
             }
 
             try {
-                $link_result = $this->post_save_linker->process_post($post_id, $post, true);
+                $link_result = $this->post_save_linker->process_post($post_id, $post, false);
             } catch (\Throwable $throwable) {
                 $state['failures']++;
                 $state['last_error'] = $throwable->getMessage();
@@ -198,13 +198,7 @@ final class Backfill_Scanner
                 continue;
             }
 
-            $changed = (bool) ($link_result['changed'] ?? false);
-
-            if ($changed) {
-                $state['changed_posts']++;
-            }
-
-            $state['inserted_links'] += max(0, (int) ($link_result['inserted_links'] ?? 0));
+            $state = $this->record_link_result($state, $link_result);
             $this->persist_state($state);
         }
 
@@ -331,6 +325,46 @@ final class Backfill_Scanner
         $state['last_error'] = trim($message);
         $state['completed_at'] = $this->current_timestamp();
         $this->persist_state($state);
+
+        return $state;
+    }
+
+    /**
+     * @param array{
+     *   status: string,
+     *   started_at: string,
+     *   completed_at: string,
+     *   cursor_post_id: int,
+     *   processed_posts: int,
+     *   changed_posts: int,
+     *   inserted_links: int,
+     *   failures: int,
+     *   last_error: string,
+     *   batch_size: int,
+     *   total_eligible_posts: int
+     * } $state
+     * @param array{processed?: bool, changed?: bool, inserted_links?: int} $link_result
+     * @return array{
+     *   status: string,
+     *   started_at: string,
+     *   completed_at: string,
+     *   cursor_post_id: int,
+     *   processed_posts: int,
+     *   changed_posts: int,
+     *   inserted_links: int,
+     *   failures: int,
+     *   last_error: string,
+     *   batch_size: int,
+     *   total_eligible_posts: int
+     * }
+     */
+    private function record_link_result(array $state, array $link_result): array
+    {
+        if ((bool) ($link_result['changed'] ?? false)) {
+            $state['changed_posts']++;
+        }
+
+        $state['inserted_links'] += max(0, (int) ($link_result['inserted_links'] ?? 0));
 
         return $state;
     }
