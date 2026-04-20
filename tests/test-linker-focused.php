@@ -397,6 +397,45 @@ $assert(
 
 $reset_environment();
 $linker = new \ClickLink\Post_Save_Linker();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 10;
+$wpdb->mappings = array(
+    array('keyword' => 'alpha', 'url' => 'https://example.com/alpha'),
+);
+
+$exclusion_encoding_content = clicklink_fixture_exclusion_and_encoding_content();
+$updated_exclusion_encoding_content = $run_save($linker, 3901, $exclusion_encoding_content, false);
+$exclusion_link_count = preg_match_all('/<a href="https:\/\/example\.com\/alpha">/', $updated_exclusion_encoding_content, $exclusion_matches);
+
+$assert(
+    str_contains(
+        $updated_exclusion_encoding_content,
+        '<p data-note="alpha > beta"><a href="https://example.com/alpha">alpha</a> &amp; beta in paragraph text.</p>'
+    ),
+    'Expected eligible paragraph text linking to preserve attribute syntax and entity encoding.'
+);
+$assert(
+    str_contains($updated_exclusion_encoding_content, '<script>var sample = "<p>alpha</p>";</script>'),
+    'Expected script regions to remain untouched during paragraph-only linking.'
+);
+$assert(
+    str_contains($updated_exclusion_encoding_content, '<style>.alpha{display:block;}</style>'),
+    'Expected style regions to remain untouched during paragraph-only linking.'
+);
+$assert(
+    str_contains($updated_exclusion_encoding_content, '<textarea>alpha hidden</textarea>'),
+    'Expected textarea regions to remain untouched during paragraph-only linking.'
+);
+$assert(
+    str_contains($updated_exclusion_encoding_content, '<h3>alpha heading</h3>'),
+    'Expected heading regions to remain untouched during paragraph-only linking.'
+);
+$assert(
+    $exclusion_link_count === 5,
+    'Expected links to be inserted only for paragraph text nodes outside excluded regions.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
 $clicklink_test_options['clicklink_options']['max_links_per_post'] = 3;
 $wpdb->mappings = array(
     array('keyword' => 'apple', 'url' => 'https://example.com/apple'),

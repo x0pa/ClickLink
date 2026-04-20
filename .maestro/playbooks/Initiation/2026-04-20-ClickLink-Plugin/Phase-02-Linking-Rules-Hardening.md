@@ -25,10 +25,16 @@ This phase converts the prototype linker into a production-safe content transfor
     - Wired a shared repository instance through `Plugin` and invalidated grouped cache after admin mapping insert/update/delete operations.
     - Expanded regression coverage in `tests/test-linker-focused.php`, `tests/test-admin-page.php`, and `tests/test-prototype-smoke.php`; full suite passed via `./tests/run-tests.sh`.
 
-- [ ] Implement robust paragraph-only HTML traversal and exclusion logic:
+- [x] Implement robust paragraph-only HTML traversal and exclusion logic:
   - Parse and walk post HTML so replacements occur only within paragraph/body text nodes
   - Exclude heading tags (`h1-h6`), anchors, code/pre, script/style, and other non-content regions from mutations
   - Preserve original markup and entity encoding to avoid content corruption during replacement
+  - Completion notes (2026-04-20, loop 00001):
+    - Replaced regex paragraph matching in `includes/class-post-save-linker.php` with a stateful HTML token walker that tracks paragraph context and applies replacements only to paragraph text fragments.
+    - Added explicit exclusion handling for anchors, headings (`h1-h6`), `code`/`pre`, `script`/`style`, and additional non-content regions (`noscript`, `template`, `textarea`, `title`, `svg`, `math`) to prevent unsafe mutations.
+    - Added quote-aware HTML token parsing and raw-text-region handling (`script`/`style`) so `<`/`>` inside attributes or script/style payloads do not corrupt traversal.
+    - Preserved source markup/entity encoding by rebuilding content from original token/text fragments instead of reserializing with DOM.
+    - Expanded coverage with `clicklink_fixture_exclusion_and_encoding_content()` and new assertions in `tests/test-linker-focused.php`; validated with `./tests/run-tests.sh` (all tests passing).
 
 - [ ] Enforce business rules for link creation consistency:
   - Apply whole-keyword matching boundaries to prevent partial-word linking artifacts

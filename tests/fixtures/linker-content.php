@@ -23,3 +23,13 @@ function clicklink_fixture_dense_keyword_content(): string
 {
     return '<p>apple apple apple apple apple apple apple</p>';
 }
+
+function clicklink_fixture_exclusion_and_encoding_content(): string
+{
+    return <<<HTML
+<p data-note="alpha > beta">alpha &amp; beta in paragraph text.</p>
+<p><script>var sample = "<p>alpha</p>";</script>alpha <style>.alpha{display:block;}</style> alpha</p>
+<h3>alpha heading</h3>
+<p>alpha in <textarea>alpha hidden</textarea> visible alpha.</p>
+HTML;
+}

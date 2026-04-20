@@ -8,6 +8,29 @@ final class Post_Save_Linker
 {
     private const CONTENT_HASH_META_KEY = '_clicklink_content_hash';
     private const OPTIONS_OPTION_KEY = 'clicklink_options';
+    private const EXCLUDED_CONTEXT_TAGS = array(
+        'a' => true,
+        'code' => true,
+        'pre' => true,
+        'script' => true,
+        'style' => true,
+        'h1' => true,
+        'h2' => true,
+        'h3' => true,
+        'h4' => true,
+        'h5' => true,
+        'h6' => true,
+        'noscript' => true,
+        'template' => true,
+        'textarea' => true,
+        'title' => true,
+        'svg' => true,
+        'math' => true,
+    );
+    private const RAW_TEXT_TAGS = array(
+        'script' => true,
+        'style' => true,
+    );
 
     private Linker_Stats $stats;
     private Keyword_Mapping_Repository $mapping_repository;
@@ -234,25 +257,104 @@ final class Post_Save_Linker
         }
 
         $inserted_links = 0;
-        $linked_content = preg_replace_callback(
-            '/<p\b[^>]*>.*?<\/p>/is',
-            function (array $matches) use ($keyword_entries, $max_links_per_post, &$inserted_links): string {
-                $paragraph = (string) ($matches[0] ?? '');
+        $linked_content = '';
+        $offset = 0;
+        $content_length = strlen($content);
+        $paragraph_depth = 0;
+        $excluded_depth = 0;
+        $raw_text_tag = '';
 
-                if ($paragraph === '' || $inserted_links >= $max_links_per_post) {
-                    return $paragraph;
+        while ($offset < $content_length) {
+            if ($raw_text_tag !== '') {
+                $raw_close_offset = stripos($content, '</' . $raw_text_tag, $offset);
+
+                if ($raw_close_offset === false) {
+                    $linked_content .= substr($content, $offset);
+                    break;
                 }
 
-                return $this->link_paragraph($paragraph, $keyword_entries, $max_links_per_post, $inserted_links);
-            },
-            $content
-        );
+                $linked_content .= substr($content, $offset, $raw_close_offset - $offset);
+                $offset = $raw_close_offset;
+                $raw_text_tag = '';
+                continue;
+            }
 
-        if (! is_string($linked_content)) {
-            return array(
-                'content' => $content,
-                'inserted_links' => 0,
-            );
+            $tag_offset = strpos($content, '<', $offset);
+
+            if ($tag_offset === false) {
+                $text_fragment = substr($content, $offset);
+                $linked_content .= $this->link_text_fragment_for_context(
+                    $text_fragment,
+                    $keyword_entries,
+                    $max_links_per_post,
+                    $inserted_links,
+                    $paragraph_depth,
+                    $excluded_depth
+                );
+                break;
+            }
+
+            if ($tag_offset > $offset) {
+                $text_fragment = substr($content, $offset, $tag_offset - $offset);
+                $linked_content .= $this->link_text_fragment_for_context(
+                    $text_fragment,
+                    $keyword_entries,
+                    $max_links_per_post,
+                    $inserted_links,
+                    $paragraph_depth,
+                    $excluded_depth
+                );
+                $offset = $tag_offset;
+                continue;
+            }
+
+            $tag_token = $this->parse_html_token($content, $offset);
+
+            if ($tag_token === null) {
+                $linked_content .= '<';
+                $offset++;
+                continue;
+            }
+
+            $linked_content .= (string) $tag_token['token'];
+            $offset = (int) ($tag_token['next_offset'] ?? ($offset + 1));
+
+            if (! ((bool) ($tag_token['is_tag'] ?? false))) {
+                continue;
+            }
+
+            $tag_name = (string) ($tag_token['name'] ?? '');
+
+            if ($tag_name === '') {
+                continue;
+            }
+
+            $is_end_tag = (bool) ($tag_token['is_end_tag'] ?? false);
+            $is_self_closing = (bool) ($tag_token['is_self_closing'] ?? false);
+
+            if ($is_end_tag) {
+                if ($tag_name === 'p' && $paragraph_depth > 0) {
+                    $paragraph_depth--;
+                }
+
+                if (isset(self::EXCLUDED_CONTEXT_TAGS[$tag_name]) && $excluded_depth > 0) {
+                    $excluded_depth--;
+                }
+
+                continue;
+            }
+
+            if ($tag_name === 'p' && ! $is_self_closing) {
+                $paragraph_depth++;
+            }
+
+            if (isset(self::EXCLUDED_CONTEXT_TAGS[$tag_name]) && ! $is_self_closing) {
+                $excluded_depth++;
+            }
+
+            if (isset(self::RAW_TEXT_TAGS[$tag_name]) && ! $is_self_closing) {
+                $raw_text_tag = $tag_name;
+            }
         }
 
         return array(
@@ -264,82 +366,149 @@ final class Post_Save_Linker
     /**
      * @param array<int, array{keyword: string, pattern: string, urls: array<int, string>, length: int}> $keyword_entries
      */
-    private function link_paragraph(
-        string $paragraph,
+    private function link_text_fragment_for_context(
+        string $text_fragment,
         array $keyword_entries,
         int $max_links_per_post,
-        int &$inserted_links
+        int &$inserted_links,
+        int $paragraph_depth,
+        int $excluded_depth
     ): string {
-        $segments = preg_split(
-            '/(<a\b[^>]*>.*?<\/a>|<code\b[^>]*>.*?<\/code>|<pre\b[^>]*>.*?<\/pre>)/is',
-            $paragraph,
-            -1,
-            PREG_SPLIT_DELIM_CAPTURE
+        if ($text_fragment === '' || $paragraph_depth <= 0 || $excluded_depth > 0) {
+            return $text_fragment;
+        }
+
+        return $this->link_plain_text(
+            $text_fragment,
+            $keyword_entries,
+            $max_links_per_post,
+            $inserted_links
         );
-
-        if (! is_array($segments)) {
-            return $paragraph;
-        }
-
-        $linked_paragraph = '';
-
-        foreach ($segments as $segment) {
-            if ($segment === '') {
-                continue;
-            }
-
-            if (preg_match('/^<(a|code|pre)\b/i', $segment) === 1) {
-                $linked_paragraph .= $segment;
-                continue;
-            }
-
-            $linked_paragraph .= $this->link_text_outside_tags(
-                $segment,
-                $keyword_entries,
-                $max_links_per_post,
-                $inserted_links
-            );
-        }
-
-        return $linked_paragraph;
     }
 
     /**
-     * @param array<int, array{keyword: string, pattern: string, urls: array<int, string>, length: int}> $keyword_entries
+     * @return array{
+     *   token: string,
+     *   next_offset: int,
+     *   is_tag: bool,
+     *   name: string,
+     *   is_end_tag: bool,
+     *   is_self_closing: bool
+     * }|null
      */
-    private function link_text_outside_tags(
-        string $html_fragment,
-        array $keyword_entries,
-        int $max_links_per_post,
-        int &$inserted_links
-    ): string {
-        $segments = preg_split('/(<[^>]+>)/', $html_fragment, -1, PREG_SPLIT_DELIM_CAPTURE);
+    private function parse_html_token(string $content, int $offset): ?array
+    {
+        $content_length = strlen($content);
 
-        if (! is_array($segments)) {
-            return $html_fragment;
+        if ($offset < 0 || $offset >= $content_length || $content[$offset] !== '<') {
+            return null;
         }
 
-        $linked_fragment = '';
+        if (substr($content, $offset, 4) === '<!--') {
+            $comment_end = strpos($content, '-->', $offset + 4);
 
-        foreach ($segments as $segment) {
-            if ($segment === '') {
-                continue;
+            if ($comment_end === false) {
+                return null;
             }
 
-            if ($segment[0] === '<') {
-                $linked_fragment .= $segment;
-                continue;
-            }
+            $next_offset = $comment_end + 3;
 
-            $linked_fragment .= $this->link_plain_text(
-                $segment,
-                $keyword_entries,
-                $max_links_per_post,
-                $inserted_links
+            return array(
+                'token' => substr($content, $offset, $next_offset - $offset),
+                'next_offset' => $next_offset,
+                'is_tag' => false,
+                'name' => '',
+                'is_end_tag' => false,
+                'is_self_closing' => false,
             );
         }
 
-        return $linked_fragment;
+        if (substr($content, $offset, 9) === '<![CDATA[') {
+            $cdata_end = strpos($content, ']]>', $offset + 9);
+
+            if ($cdata_end === false) {
+                return null;
+            }
+
+            $next_offset = $cdata_end + 3;
+
+            return array(
+                'token' => substr($content, $offset, $next_offset - $offset),
+                'next_offset' => $next_offset,
+                'is_tag' => false,
+                'name' => '',
+                'is_end_tag' => false,
+                'is_self_closing' => false,
+            );
+        }
+
+        if (substr($content, $offset, 2) === '<?') {
+            $pi_end = strpos($content, '?>', $offset + 2);
+
+            if ($pi_end === false) {
+                return null;
+            }
+
+            $next_offset = $pi_end + 2;
+
+            return array(
+                'token' => substr($content, $offset, $next_offset - $offset),
+                'next_offset' => $next_offset,
+                'is_tag' => false,
+                'name' => '',
+                'is_end_tag' => false,
+                'is_self_closing' => false,
+            );
+        }
+
+        $quote = '';
+        $cursor = $offset + 1;
+
+        while ($cursor < $content_length) {
+            $char = $content[$cursor];
+
+            if ($quote === '') {
+                if ($char === '"' || $char === '\'') {
+                    $quote = $char;
+                } elseif ($char === '>') {
+                    break;
+                }
+            } elseif ($char === $quote) {
+                $quote = '';
+            }
+
+            $cursor++;
+        }
+
+        if ($cursor >= $content_length || $content[$cursor] !== '>') {
+            return null;
+        }
+
+        $next_offset = $cursor + 1;
+        $token = substr($content, $offset, $next_offset - $offset);
+        $name = '';
+        $is_tag = false;
+        $is_end_tag = false;
+        $is_self_closing = false;
+
+        if (preg_match('/^<\s*\/\s*([a-zA-Z][a-zA-Z0-9:-]*)\b/s', $token, $matches) === 1) {
+            $name = strtolower((string) ($matches[1] ?? ''));
+            $is_tag = true;
+            $is_end_tag = true;
+        } elseif (preg_match('/^<\s*([a-zA-Z][a-zA-Z0-9:-]*)\b/s', $token, $matches) === 1) {
+            $name = strtolower((string) ($matches[1] ?? ''));
+            $is_tag = true;
+            $is_self_closing = preg_match('/\/\s*>$/', $token) === 1;
+        }
+
+        return array(
+            'token' => $token,
+            'next_offset' => $next_offset,
+            'is_tag' => $is_tag,
+            'name' => $name,
+            'is_end_tag' => $is_end_tag,
+            'is_self_closing' => $is_self_closing,
+        );
     }
 
     /**
