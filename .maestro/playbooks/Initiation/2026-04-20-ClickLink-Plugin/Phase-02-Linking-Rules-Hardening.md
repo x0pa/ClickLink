@@ -46,10 +46,15 @@ This phase converts the prototype linker into a production-safe content transfor
     - Added cap-specific regressions in `tests/test-linker-focused.php` covering deterministic earliest-match stopping at cap and safe no-op behavior when `max_links_per_post = 0`.
     - Validated with `php tests/test-linker-focused.php` and `./tests/run-tests.sh` (all tests passing).
 
-- [ ] Add comprehensive automated tests for hardened linking behavior:
+- [x] Add comprehensive automated tests for hardened linking behavior:
   - Create unit tests for boundary matching, duplicate-keyword URL randomization, exclusion-zone protection, and cap enforcement
   - Add regression fixtures for HTML with nested tags, existing links, code snippets, and heading-heavy content
   - Add negative tests ensuring unchanged output when no valid mappings or no paragraph matches exist
+  - Completion notes (2026-04-20, loop 00001):
+    - Extended `tests/test-linker-focused.php` with dedicated assertions for nested inline HTML linking behavior while preserving existing anchors/code regions.
+    - Added new fixtures in `tests/fixtures/linker-content.php` for nested paragraph markup and heading-heavy/no-paragraph content to strengthen regression coverage.
+    - Added explicit negative-path tests verifying unchanged output and zero post updates when mappings are invalid or when content has no eligible paragraph text nodes.
+    - Validated full plugin test coverage with `./tests/run-tests.sh` (all tests passing).
 
 - [ ] Run test suite and quality checks, then remediate failures:
   - Execute unit/integration test commands and static checks configured in the plugin

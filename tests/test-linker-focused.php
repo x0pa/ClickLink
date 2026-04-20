@@ -446,6 +446,74 @@ $assert(
 
 $reset_environment();
 $linker = new \ClickLink\Post_Save_Linker();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 10;
+$wpdb->mappings = array(
+    array('keyword' => 'alpha', 'url' => 'https://example.com/alpha'),
+);
+
+$nested_html_content = clicklink_fixture_nested_html_content();
+$updated_nested_html_content = $run_save($linker, 4102, $nested_html_content, false);
+$nested_link_count = preg_match_all('/<a href="https:\/\/example\.com\/alpha">/', $updated_nested_html_content, $nested_matches);
+
+$assert(
+    $nested_link_count === 3,
+    'Expected nested inline paragraph content to be linked while preserving existing anchors and code snippets.'
+);
+$assert(
+    str_contains($updated_nested_html_content, '<a href="https://external.example.com/alpha">alpha</a>'),
+    'Expected existing anchors inside nested paragraph markup to remain untouched.'
+);
+$assert(
+    str_contains($updated_nested_html_content, '<code>alpha</code>'),
+    'Expected code snippets inside nested paragraph markup to remain untouched.'
+);
+$assert(
+    str_contains($updated_nested_html_content, '<strong><a href="https://example.com/alpha">alpha</a></strong>'),
+    'Expected nested inline tags inside paragraphs to keep markup intact while linking eligible text.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 10;
+$wpdb->mappings = array(
+    array('keyword' => 'alpha', 'url' => ''),
+    array('keyword' => '', 'url' => 'https://example.com/empty-keyword'),
+    array('keyword' => 'alpha', 'url' => 'not-a-valid-url'),
+);
+
+$no_valid_mapping_content = '<p>alpha should remain plain text when no valid mappings exist.</p>';
+$updated_no_valid_mapping_content = $run_save($linker, 4203, $no_valid_mapping_content, false);
+
+$assert(
+    $updated_no_valid_mapping_content === $no_valid_mapping_content,
+    'Expected content to remain unchanged when the mapping table has no valid keyword/url pairs.'
+);
+$assert(
+    $clicklink_test_updates === array(),
+    'Expected no post content update when no valid mappings are available for linking.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 10;
+$wpdb->mappings = array(
+    array('keyword' => 'alpha', 'url' => 'https://example.com/alpha'),
+);
+
+$heading_heavy_content = clicklink_fixture_heading_heavy_content();
+$updated_heading_heavy_content = $run_save($linker, 4304, $heading_heavy_content, false);
+
+$assert(
+    $updated_heading_heavy_content === $heading_heavy_content,
+    'Expected heading-heavy content without paragraph text nodes to remain unchanged.'
+);
+$assert(
+    $clicklink_test_updates === array(),
+    'Expected no post content update when no paragraph text regions are eligible for linking.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
 $clicklink_test_options['clicklink_options']['max_links_per_post'] = 3;
 $wpdb->mappings = array(
     array('keyword' => 'apple', 'url' => 'https://example.com/apple'),

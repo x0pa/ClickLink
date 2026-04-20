@@ -33,3 +33,21 @@ function clicklink_fixture_exclusion_and_encoding_content(): string
 <p>alpha in <textarea>alpha hidden</textarea> visible alpha.</p>
 HTML;
 }
+
+function clicklink_fixture_nested_html_content(): string
+{
+    return <<<HTML
+<h2>alpha heading</h2>
+<p>alpha <span>beta <strong>alpha</strong></span> and <a href="https://external.example.com/alpha">alpha</a>.</p>
+<p><code>alpha</code> plus <em>alpha</em> within nested inline tags.</p>
+HTML;
+}
+
+function clicklink_fixture_heading_heavy_content(): string
+{
+    return <<<HTML
+<h1>alpha title</h1>
+<h2>alpha subtitle</h2>
+<section><h3>alpha section</h3><div>alpha in non-paragraph content.</div></section>
+HTML;
+}
