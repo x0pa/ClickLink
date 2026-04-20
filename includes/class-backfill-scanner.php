@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ClickLink;
 
+require_once __DIR__ . '/class-runtime.php';
+
 final class Backfill_Scanner
 {
     private const STATE_OPTION_KEY = 'clicklink_backfill_run_state';
@@ -54,18 +56,18 @@ final class Backfill_Scanner
 
         $normalized_state = $defaults;
         $normalized_state['status'] = self::normalize_status($raw_state['status'] ?? $defaults['status']);
-        $normalized_state['started_at'] = self::scalar_string($raw_state['started_at'] ?? $defaults['started_at']);
-        $normalized_state['completed_at'] = self::scalar_string($raw_state['completed_at'] ?? $defaults['completed_at']);
-        $normalized_state['cursor_post_id'] = self::non_negative_int($raw_state['cursor_post_id'] ?? $defaults['cursor_post_id']);
-        $normalized_state['processed_posts'] = self::non_negative_int($raw_state['processed_posts'] ?? $defaults['processed_posts']);
-        $normalized_state['changed_posts'] = self::non_negative_int($raw_state['changed_posts'] ?? $defaults['changed_posts']);
-        $normalized_state['inserted_links'] = self::non_negative_int($raw_state['inserted_links'] ?? $defaults['inserted_links']);
-        $normalized_state['failures'] = self::non_negative_int($raw_state['failures'] ?? $defaults['failures']);
-        $normalized_state['last_error'] = self::scalar_string($raw_state['last_error'] ?? $defaults['last_error']);
+        $normalized_state['started_at'] = Runtime::scalar_string($raw_state['started_at'] ?? $defaults['started_at']);
+        $normalized_state['completed_at'] = Runtime::scalar_string($raw_state['completed_at'] ?? $defaults['completed_at']);
+        $normalized_state['cursor_post_id'] = Runtime::non_negative_int($raw_state['cursor_post_id'] ?? $defaults['cursor_post_id']);
+        $normalized_state['processed_posts'] = Runtime::non_negative_int($raw_state['processed_posts'] ?? $defaults['processed_posts']);
+        $normalized_state['changed_posts'] = Runtime::non_negative_int($raw_state['changed_posts'] ?? $defaults['changed_posts']);
+        $normalized_state['inserted_links'] = Runtime::non_negative_int($raw_state['inserted_links'] ?? $defaults['inserted_links']);
+        $normalized_state['failures'] = Runtime::non_negative_int($raw_state['failures'] ?? $defaults['failures']);
+        $normalized_state['last_error'] = Runtime::scalar_string($raw_state['last_error'] ?? $defaults['last_error']);
         $normalized_state['batch_size'] = self::clamp_batch_size(
-            self::non_negative_int($raw_state['batch_size'] ?? $defaults['batch_size'])
+            Runtime::non_negative_int($raw_state['batch_size'] ?? $defaults['batch_size'])
         );
-        $normalized_state['total_eligible_posts'] = self::non_negative_int(
+        $normalized_state['total_eligible_posts'] = Runtime::non_negative_int(
             $raw_state['total_eligible_posts'] ?? $defaults['total_eligible_posts']
         );
 
@@ -125,7 +127,7 @@ final class Backfill_Scanner
         $this->persist_state($state);
 
         $state['status'] = self::STATUS_RUNNING;
-        $state['started_at'] = $this->current_timestamp();
+        $state['started_at'] = Runtime::current_datetime_utc();
         $state['completed_at'] = '';
         $state['last_error'] = '';
         $this->persist_state($state);
@@ -156,7 +158,7 @@ final class Backfill_Scanner
             $state['status'] = self::STATUS_RUNNING;
 
             if ($state['started_at'] === '') {
-                $state['started_at'] = $this->current_timestamp();
+                $state['started_at'] = Runtime::current_datetime_utc();
             }
 
             $this->persist_state($state);
@@ -193,7 +195,7 @@ final class Backfill_Scanner
                 $link_result = $this->post_save_linker->process_post($post_id, $post, false);
             } catch (\Throwable $throwable) {
                 $state['failures']++;
-                $state['last_error'] = $throwable->getMessage();
+                $state['last_error'] = Runtime::throwable_message($throwable);
                 $this->persist_state($state);
                 continue;
             }
@@ -210,7 +212,7 @@ final class Backfill_Scanner
 
         if (! $has_remaining_posts) {
             $state['status'] = self::STATUS_COMPLETED;
-            $state['completed_at'] = $this->current_timestamp();
+            $state['completed_at'] = Runtime::current_datetime_utc();
         }
 
         $this->persist_state($state);
@@ -283,7 +285,7 @@ final class Backfill_Scanner
         $state['status'] = self::STATUS_COMPLETED;
 
         if ($state['completed_at'] === '') {
-            $state['completed_at'] = $this->current_timestamp();
+            $state['completed_at'] = Runtime::current_datetime_utc();
         }
 
         $this->persist_state($state);
@@ -323,7 +325,7 @@ final class Backfill_Scanner
     {
         $state['status'] = self::STATUS_ERROR;
         $state['last_error'] = trim($message);
-        $state['completed_at'] = $this->current_timestamp();
+        $state['completed_at'] = Runtime::current_datetime_utc();
         $this->persist_state($state);
 
         return $state;
@@ -395,7 +397,7 @@ final class Backfill_Scanner
 
     private function resolve_batch_size(?int $batch_size): int
     {
-        $requested_batch_size = self::non_negative_int($batch_size ?? self::DEFAULT_BATCH_SIZE);
+        $requested_batch_size = Runtime::non_negative_int($batch_size ?? self::DEFAULT_BATCH_SIZE);
         $sanitized_batch_size = self::clamp_batch_size($requested_batch_size);
         $timeout_batch_limit = $this->timeout_batch_limit();
 
@@ -410,7 +412,7 @@ final class Backfill_Scanner
             return $default_limit;
         }
 
-        $max_execution_time = self::non_negative_ini_int(ini_get('max_execution_time'));
+        $max_execution_time = Runtime::non_negative_int(ini_get('max_execution_time'));
 
         if ($max_execution_time <= 0) {
             return $default_limit;
@@ -434,12 +436,12 @@ final class Backfill_Scanner
             return 0;
         }
 
-        $posts_table = self::posts_table_name($wpdb);
+        $posts_table = Runtime::posts_table_name($wpdb);
         $count = $wpdb->get_var(
             "SELECT COUNT(*) FROM {$posts_table} WHERE post_type = 'post' AND post_status = 'publish'"
         );
 
-        return self::non_negative_int($count);
+        return Runtime::non_negative_int($count);
     }
 
     /**
@@ -453,7 +455,7 @@ final class Backfill_Scanner
             return null;
         }
 
-        $posts_table = self::posts_table_name($wpdb);
+        $posts_table = Runtime::posts_table_name($wpdb);
         $cursor = max(0, $cursor_post_id);
         $limit = max(1, $batch_size);
         $query = "SELECT ID FROM {$posts_table} "
@@ -468,7 +470,7 @@ final class Backfill_Scanner
         $post_ids = array();
 
         foreach ($results as $result) {
-            $post_id = self::non_negative_int($result);
+            $post_id = Runtime::non_negative_int($result);
 
             if ($post_id <= 0) {
                 continue;
@@ -512,70 +514,6 @@ final class Backfill_Scanner
         return $post;
     }
 
-    /**
-     * @param mixed $value
-     */
-    private static function scalar_string($value): string
-    {
-        if (! is_scalar($value)) {
-            return '';
-        }
-
-        return trim((string) $value);
-    }
-
-    /**
-     * @param mixed $value
-     */
-    private static function non_negative_int($value): int
-    {
-        if (! is_scalar($value) || $value === '') {
-            return 0;
-        }
-
-        $validated = filter_var(
-            (string) $value,
-            FILTER_VALIDATE_INT,
-            array(
-                'options' => array(
-                    'min_range' => 0,
-                ),
-            )
-        );
-
-        if ($validated === false) {
-            return 0;
-        }
-
-        return (int) $validated;
-    }
-
-    /**
-     * @param mixed $value
-     */
-    private static function non_negative_ini_int($value): int
-    {
-        if (! is_scalar($value) || $value === '') {
-            return 0;
-        }
-
-        $validated = filter_var(
-            (string) $value,
-            FILTER_VALIDATE_INT,
-            array(
-                'options' => array(
-                    'min_range' => 0,
-                ),
-            )
-        );
-
-        if ($validated === false) {
-            return 0;
-        }
-
-        return (int) $validated;
-    }
-
     private static function clamp_batch_size(int $batch_size): int
     {
         return max(1, min(self::MAX_BATCH_SIZE, $batch_size));
@@ -597,28 +535,4 @@ final class Backfill_Scanner
         return $status;
     }
 
-    /**
-     * @param object $wpdb
-     */
-    private static function posts_table_name(object $wpdb): string
-    {
-        if (isset($wpdb->posts) && is_string($wpdb->posts) && $wpdb->posts !== '') {
-            return $wpdb->posts;
-        }
-
-        if (isset($wpdb->prefix) && is_string($wpdb->prefix) && $wpdb->prefix !== '') {
-            return $wpdb->prefix . 'posts';
-        }
-
-        return 'posts';
-    }
-
-    private function current_timestamp(): string
-    {
-        if (function_exists('current_time')) {
-            return (string) current_time('mysql', true);
-        }
-
-        return gmdate('Y-m-d H:i:s');
-    }
 }

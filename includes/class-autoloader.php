@@ -25,6 +25,7 @@ final class Autoloader
             'Compatibility' => CLICKLINK_PATH . 'includes/class-compatibility.php',
             'Lifecycle' => CLICKLINK_PATH . 'includes/class-lifecycle.php',
             'Installer' => CLICKLINK_PATH . 'includes/class-installer.php',
+            'Runtime' => CLICKLINK_PATH . 'includes/class-runtime.php',
             'Keyword_Mapping_Repository' => CLICKLINK_PATH . 'includes/class-keyword-mapping-repository.php',
             'Linker_Stats' => CLICKLINK_PATH . 'includes/class-linker-stats.php',
             'Post_Save_Linker' => CLICKLINK_PATH . 'includes/class-post-save-linker.php',

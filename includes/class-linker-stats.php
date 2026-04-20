@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ClickLink;
 
+require_once __DIR__ . '/class-runtime.php';
+
 final class Linker_Stats
 {
     private const STATS_OPTION_KEY = 'clicklink_stats';
@@ -55,8 +57,10 @@ final class Linker_Stats
         }
 
         return array(
-            'total_links_inserted' => self::non_negative_int($saved_stats['total_links_inserted'] ?? $defaults['total_links_inserted']),
-            'posts_touched' => self::non_negative_int($saved_stats['posts_touched'] ?? $defaults['posts_touched']),
+            'total_links_inserted' => Runtime::non_negative_int(
+                $saved_stats['total_links_inserted'] ?? $defaults['total_links_inserted']
+            ),
+            'posts_touched' => Runtime::non_negative_int($saved_stats['posts_touched'] ?? $defaults['posts_touched']),
         );
     }
 
@@ -86,11 +90,11 @@ final class Linker_Stats
             return 0;
         }
 
-        $posts_table = self::posts_table_name($wpdb);
+        $posts_table = Runtime::posts_table_name($wpdb);
         $query = "SELECT COUNT(*) FROM {$posts_table} WHERE post_type = 'post' AND post_status <> 'auto-draft'";
         $count = $wpdb->get_var($query);
 
-        return self::non_negative_int($count);
+        return Runtime::non_negative_int($count);
     }
 
     public function total_mappings(): int
@@ -104,7 +108,7 @@ final class Linker_Stats
         $table_name = Installer::table_name();
         $count = $wpdb->get_var("SELECT COUNT(*) FROM {$table_name}");
 
-        return self::non_negative_int($count);
+        return Runtime::non_negative_int($count);
     }
 
     /**
@@ -162,7 +166,7 @@ final class Linker_Stats
 
         $value = get_post_meta($post_id, $meta_key, true);
 
-        return self::non_negative_int($value);
+        return Runtime::non_negative_int($value);
     }
 
     private function update_post_meta_value(int $post_id, string $meta_key, string $value): void
@@ -174,45 +178,4 @@ final class Linker_Stats
         update_post_meta($post_id, $meta_key, $value);
     }
 
-    /**
-     * @param mixed $value
-     */
-    private static function non_negative_int($value): int
-    {
-        if (! is_scalar($value) || $value === '') {
-            return 0;
-        }
-
-        $validated = filter_var(
-            (string) $value,
-            FILTER_VALIDATE_INT,
-            array(
-                'options' => array(
-                    'min_range' => 0,
-                ),
-            )
-        );
-
-        if ($validated === false) {
-            return 0;
-        }
-
-        return (int) $validated;
-    }
-
-    /**
-     * @param object $wpdb
-     */
-    private static function posts_table_name(object $wpdb): string
-    {
-        if (isset($wpdb->posts) && is_string($wpdb->posts) && $wpdb->posts !== '') {
-            return $wpdb->posts;
-        }
-
-        if (isset($wpdb->prefix) && is_string($wpdb->prefix) && $wpdb->prefix !== '') {
-            return $wpdb->prefix . 'posts';
-        }
-
-        return 'posts';
-    }
 }

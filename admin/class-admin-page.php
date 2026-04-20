@@ -7,6 +7,8 @@ namespace ClickLink\Admin;
 use ClickLink\Backfill_Scanner;
 use ClickLink\Installer;
 use ClickLink\Keyword_Mapping_Repository;
+use ClickLink\Runtime;
+use RuntimeException;
 
 final class Admin_Page
 {
@@ -17,11 +19,6 @@ final class Admin_Page
     private const START_SCAN_ACTION = 'clicklink_backfill_start';
     private const NEXT_BATCH_ACTION = 'clicklink_backfill_next_batch';
     private const RESET_SCAN_ACTION = 'clicklink_backfill_reset';
-    private const SAVE_NONCE_ACTION = 'clicklink_save_mapping';
-    private const DELETE_NONCE_ACTION = 'clicklink_delete_mapping';
-    private const START_SCAN_NONCE_ACTION = 'clicklink_backfill_start';
-    private const NEXT_BATCH_NONCE_ACTION = 'clicklink_backfill_next_batch';
-    private const RESET_SCAN_NONCE_ACTION = 'clicklink_backfill_reset';
     private const NOTICE_QUERY_KEY = 'clicklink_notice';
     private Keyword_Mapping_Repository $mapping_repository;
     private ?Backfill_Scanner $backfill_scanner;
@@ -41,14 +38,24 @@ final class Admin_Page
         }
 
         add_action('admin_menu', array($this, 'register_menu'));
-        add_action('admin_post_' . self::SAVE_ACTION, array($this, 'handle_save_mapping'));
-        add_action('admin_post_' . self::DELETE_ACTION, array($this, 'handle_delete_mapping'));
-        add_action('admin_post_' . self::START_SCAN_ACTION, array($this, 'handle_start_scan'));
-        add_action('admin_post_' . self::NEXT_BATCH_ACTION, array($this, 'handle_next_batch'));
-        add_action('admin_post_' . self::RESET_SCAN_ACTION, array($this, 'handle_reset_scan'));
-        add_action('wp_ajax_' . self::START_SCAN_ACTION, array($this, 'handle_start_scan_ajax'));
-        add_action('wp_ajax_' . self::NEXT_BATCH_ACTION, array($this, 'handle_next_batch_ajax'));
-        add_action('wp_ajax_' . self::RESET_SCAN_ACTION, array($this, 'handle_reset_scan_ajax'));
+        $this->register_action_handlers(
+            'admin_post_',
+            array(
+                self::SAVE_ACTION => 'handle_save_mapping',
+                self::DELETE_ACTION => 'handle_delete_mapping',
+                self::START_SCAN_ACTION => 'handle_start_scan',
+                self::NEXT_BATCH_ACTION => 'handle_next_batch',
+                self::RESET_SCAN_ACTION => 'handle_reset_scan',
+            )
+        );
+        $this->register_action_handlers(
+            'wp_ajax_',
+            array(
+                self::START_SCAN_ACTION => 'handle_start_scan_ajax',
+                self::NEXT_BATCH_ACTION => 'handle_next_batch_ajax',
+                self::RESET_SCAN_ACTION => 'handle_reset_scan_ajax',
+            )
+        );
     }
 
     public function register_menu(): void
@@ -97,12 +104,12 @@ final class Admin_Page
             return;
         }
 
-        if (! $this->verify_nonce(self::SAVE_NONCE_ACTION)) {
+        if (! $this->verify_nonce(self::SAVE_ACTION)) {
             $this->redirect_with_notice('invalid_nonce');
             return;
         }
 
-        $mapping_id = self::positive_int(self::request_post('mapping_id'));
+        $mapping_id = Runtime::positive_int(self::request_post('mapping_id'));
         $keyword = Keyword_Mapping_Repository::normalize_keyword_for_storage(self::request_post('keyword'));
         $url = Keyword_Mapping_Repository::sanitize_url(self::request_post('url'));
 
@@ -141,12 +148,12 @@ final class Admin_Page
             return;
         }
 
-        if (! $this->verify_nonce(self::DELETE_NONCE_ACTION)) {
+        if (! $this->verify_nonce(self::DELETE_ACTION)) {
             $this->redirect_with_notice('invalid_nonce');
             return;
         }
 
-        $mapping_id = self::positive_int(self::request_post('mapping_id'));
+        $mapping_id = Runtime::positive_int(self::request_post('mapping_id'));
 
         if ($mapping_id <= 0) {
             $this->redirect_with_notice('invalid_input');
@@ -173,7 +180,7 @@ final class Admin_Page
             return;
         }
 
-        if (! $this->verify_nonce(self::START_SCAN_NONCE_ACTION)) {
+        if (! $this->verify_nonce(self::START_SCAN_ACTION)) {
             $this->redirect_with_notice('invalid_nonce');
             return;
         }
@@ -188,7 +195,7 @@ final class Admin_Page
             return;
         }
 
-        if (! $this->verify_nonce(self::NEXT_BATCH_NONCE_ACTION)) {
+        if (! $this->verify_nonce(self::NEXT_BATCH_ACTION)) {
             $this->redirect_with_notice('invalid_nonce');
             return;
         }
@@ -203,7 +210,7 @@ final class Admin_Page
             return;
         }
 
-        if (! $this->verify_nonce(self::RESET_SCAN_NONCE_ACTION)) {
+        if (! $this->verify_nonce(self::RESET_SCAN_ACTION)) {
             $this->redirect_with_notice('invalid_nonce');
             return;
         }
@@ -214,7 +221,7 @@ final class Admin_Page
     public function handle_start_scan_ajax(): void
     {
         $this->handle_scan_ajax_request(
-            self::START_SCAN_NONCE_ACTION,
+            self::START_SCAN_ACTION,
             static fn (self $page): string => $page->start_scan_notice_code()
         );
     }
@@ -222,7 +229,7 @@ final class Admin_Page
     public function handle_next_batch_ajax(): void
     {
         $this->handle_scan_ajax_request(
-            self::NEXT_BATCH_NONCE_ACTION,
+            self::NEXT_BATCH_ACTION,
             static fn (self $page): string => $page->next_batch_notice_code()
         );
     }
@@ -230,7 +237,7 @@ final class Admin_Page
     public function handle_reset_scan_ajax(): void
     {
         $this->handle_scan_ajax_request(
-            self::RESET_SCAN_NONCE_ACTION,
+            self::RESET_SCAN_ACTION,
             static fn (self $page): string => $page->reset_scan_notice_code()
         );
     }
@@ -248,7 +255,7 @@ final class Admin_Page
             return 'scan_no_posts';
         }
 
-        $requested_batch_size = self::positive_int(self::request_post('batch_size'));
+        $requested_batch_size = Runtime::positive_int(self::request_post('batch_size'));
         $started_state = $scanner->start_run($requested_batch_size > 0 ? $requested_batch_size : null);
 
         if (($started_state['status'] ?? '') === 'running') {
@@ -262,7 +269,7 @@ final class Admin_Page
     {
         $scanner = $this->backfill_scanner();
         $state = $scanner->get_state();
-        $status = self::scalar_string($state['status'] ?? '');
+        $status = Runtime::scalar_string($state['status'] ?? '');
 
         if ($status === 'completed') {
             return 'scan_completed';
@@ -277,7 +284,7 @@ final class Admin_Page
         }
 
         $processed_state = $scanner->process_next_batch();
-        $processed_status = self::scalar_string($processed_state['status'] ?? '');
+        $processed_status = Runtime::scalar_string($processed_state['status'] ?? '');
 
         if ($processed_status === 'running') {
             return 'scan_batch_processed';
@@ -357,16 +364,16 @@ final class Admin_Page
     {
         $scanner = $this->backfill_scanner();
         $state = $scanner->get_state();
-        $status = self::scalar_string($state['status'] ?? 'pending');
-        $processed_posts = self::non_negative_int($state['processed_posts'] ?? 0);
-        $changed_posts = self::non_negative_int($state['changed_posts'] ?? 0);
-        $inserted_links = self::non_negative_int($state['inserted_links'] ?? 0);
-        $batch_size = max(1, self::non_negative_int($state['batch_size'] ?? 0));
-        $state_total_eligible_posts = self::non_negative_int($state['total_eligible_posts'] ?? 0);
+        $status = Runtime::scalar_string($state['status'] ?? 'pending');
+        $processed_posts = Runtime::non_negative_int($state['processed_posts'] ?? 0);
+        $changed_posts = Runtime::non_negative_int($state['changed_posts'] ?? 0);
+        $inserted_links = Runtime::non_negative_int($state['inserted_links'] ?? 0);
+        $batch_size = max(1, Runtime::non_negative_int($state['batch_size'] ?? 0));
+        $state_total_eligible_posts = Runtime::non_negative_int($state['total_eligible_posts'] ?? 0);
         $current_eligible_posts = max(0, $scanner->current_eligible_posts());
-        $started_at = self::scalar_string($state['started_at'] ?? '');
-        $completed_at = self::scalar_string($state['completed_at'] ?? '');
-        $last_error = self::scalar_string($state['last_error'] ?? '');
+        $started_at = Runtime::scalar_string($state['started_at'] ?? '');
+        $completed_at = Runtime::scalar_string($state['completed_at'] ?? '');
+        $last_error = Runtime::scalar_string($state['last_error'] ?? '');
 
         $display_total_eligible_posts = $state_total_eligible_posts;
 
@@ -406,7 +413,7 @@ final class Admin_Page
 
         echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
         echo '<input type="hidden" name="action" value="' . self::escape_attr(self::START_SCAN_ACTION) . '">';
-        echo self::nonce_field(self::START_SCAN_NONCE_ACTION);
+        echo self::nonce_field(self::START_SCAN_ACTION);
         echo '<p class="submit"><button type="submit" class="button button-primary"' . $start_button_disabled_attr . '>';
         echo self::escape(self::translate('Run Now'));
         echo '</button></p>';
@@ -414,7 +421,7 @@ final class Admin_Page
 
         echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
         echo '<input type="hidden" name="action" value="' . self::escape_attr(self::NEXT_BATCH_ACTION) . '">';
-        echo self::nonce_field(self::NEXT_BATCH_NONCE_ACTION);
+        echo self::nonce_field(self::NEXT_BATCH_ACTION);
         echo '<p class="submit"><button type="submit" class="button button-secondary"' . $next_batch_button_disabled_attr . '>';
         echo self::escape(self::translate('Process Next Batch'));
         echo '</button></p>';
@@ -422,7 +429,7 @@ final class Admin_Page
 
         echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
         echo '<input type="hidden" name="action" value="' . self::escape_attr(self::RESET_SCAN_ACTION) . '">';
-        echo self::nonce_field(self::RESET_SCAN_NONCE_ACTION);
+        echo self::nonce_field(self::RESET_SCAN_ACTION);
         echo '<p class="submit"><button type="submit" class="button button-secondary"' . $reset_button_disabled_attr . '>';
         echo self::escape(self::translate('Cancel / Reset Run'));
         echo '</button></p>';
@@ -444,7 +451,7 @@ final class Admin_Page
         echo '<h2>' . self::escape($form_heading) . '</h2>';
         echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '">';
         echo '<input type="hidden" name="action" value="' . self::escape_attr(self::SAVE_ACTION) . '">';
-        echo self::nonce_field(self::SAVE_NONCE_ACTION);
+        echo self::nonce_field(self::SAVE_ACTION);
 
         if ($is_edit) {
             echo '<input type="hidden" name="mapping_id" value="' . self::escape_attr((string) $mapping_id) . '">';
@@ -512,7 +519,7 @@ final class Admin_Page
             echo '<form method="post" action="' . self::escape_url($this->admin_post_url()) . '" style="display:inline-block; margin:0;">';
             echo '<input type="hidden" name="action" value="' . self::escape_attr(self::DELETE_ACTION) . '">';
             echo '<input type="hidden" name="mapping_id" value="' . self::escape_attr((string) $id) . '">';
-            echo self::nonce_field(self::DELETE_NONCE_ACTION);
+            echo self::nonce_field(self::DELETE_ACTION);
             echo '<button type="submit" class="button button-small button-link-delete">' . self::escape(self::translate('Delete')) . '</button>';
             echo '</form>';
             echo '</td>';
@@ -580,7 +587,7 @@ final class Admin_Page
             return null;
         }
 
-        $mapping_id = self::positive_int(self::request_get('mapping_id'));
+        $mapping_id = Runtime::positive_int(self::request_get('mapping_id'));
 
         if ($mapping_id <= 0) {
             return null;
@@ -602,7 +609,7 @@ final class Admin_Page
             return false;
         }
 
-        $current_datetime = self::current_datetime();
+        $current_datetime = Runtime::current_datetime_utc();
 
         $result = $wpdb->insert(
             Installer::table_name(),
@@ -637,7 +644,7 @@ final class Admin_Page
             array(
                 'keyword' => $keyword,
                 'url' => $url,
-                'updated_at' => self::current_datetime(),
+                'updated_at' => Runtime::current_datetime_utc(),
             ),
             array(
                 'id' => $mapping_id,
@@ -678,19 +685,6 @@ final class Admin_Page
         $this->mapping_repository->invalidate_grouped_cache();
 
         return true;
-    }
-
-    private static function current_datetime(): string
-    {
-        if (function_exists('current_time')) {
-            $current_time = current_time('mysql', true);
-
-            if (is_string($current_time) && $current_time !== '') {
-                return $current_time;
-            }
-        }
-
-        return gmdate('Y-m-d H:i:s');
     }
 
     private function verify_nonce(string $action): bool
@@ -749,7 +743,10 @@ final class Admin_Page
     {
         if (function_exists('wp_die')) {
             wp_die(self::escape('You do not have permission to access this page.'));
+            return;
         }
+
+        throw new RuntimeException('You do not have permission to access this page.');
     }
 
     private function backfill_scanner(): Backfill_Scanner
@@ -764,6 +761,16 @@ final class Admin_Page
     private static function can_manage(): bool
     {
         return function_exists('current_user_can') && current_user_can(self::CAPABILITY);
+    }
+
+    /**
+     * @param array<string, string> $handlers
+     */
+    private function register_action_handlers(string $hook_prefix, array $handlers): void
+    {
+        foreach ($handlers as $action => $method) {
+            add_action($hook_prefix . $action, array($this, $method));
+        }
     }
 
     /**
@@ -834,49 +841,6 @@ final class Admin_Page
         }
 
         return stripslashes($value);
-    }
-
-    private static function positive_int(string $value): int
-    {
-        $validated = filter_var($value, FILTER_VALIDATE_INT, array('options' => array('min_range' => 1)));
-
-        if ($validated === false) {
-            return 0;
-        }
-
-        return (int) $validated;
-    }
-
-    private static function non_negative_int($value): int
-    {
-        if (! is_scalar($value) || $value === '') {
-            return 0;
-        }
-
-        $validated = filter_var(
-            (string) $value,
-            FILTER_VALIDATE_INT,
-            array(
-                'options' => array(
-                    'min_range' => 0,
-                ),
-            )
-        );
-
-        if ($validated === false) {
-            return 0;
-        }
-
-        return (int) $validated;
-    }
-
-    private static function scalar_string($value): string
-    {
-        if (! is_scalar($value)) {
-            return '';
-        }
-
-        return trim((string) $value);
     }
 
     private static function format_number(int $value): string
