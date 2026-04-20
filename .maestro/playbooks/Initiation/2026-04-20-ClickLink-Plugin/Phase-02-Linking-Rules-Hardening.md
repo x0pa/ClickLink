@@ -36,10 +36,15 @@ This phase converts the prototype linker into a production-safe content transfor
     - Preserved source markup/entity encoding by rebuilding content from original token/text fragments instead of reserializing with DOM.
     - Expanded coverage with `clicklink_fixture_exclusion_and_encoding_content()` and new assertions in `tests/test-linker-focused.php`; validated with `./tests/run-tests.sh` (all tests passing).
 
-- [ ] Enforce business rules for link creation consistency:
+- [x] Enforce business rules for link creation consistency:
   - Apply whole-keyword matching boundaries to prevent partial-word linking artifacts
   - Randomly select among multiple URLs for the same keyword each time a match is linked
   - Enforce a strict max-links-per-post cap (default 5) with deterministic stopping and safe no-op when cap is reached
+  - Completion notes (2026-04-20, loop 00001):
+    - Hardened `includes/class-post-save-linker.php` to stop HTML traversal immediately once `max_links_per_post` is reached, appending the remaining source content untouched for deterministic cap behavior.
+    - Confirmed whole-keyword boundary and duplicate-keyword random URL behavior via focused linker assertions, including per-match random selector call tracking.
+    - Added cap-specific regressions in `tests/test-linker-focused.php` covering deterministic earliest-match stopping at cap and safe no-op behavior when `max_links_per_post = 0`.
+    - Validated with `php tests/test-linker-focused.php` and `./tests/run-tests.sh` (all tests passing).
 
 - [ ] Add comprehensive automated tests for hardened linking behavior:
   - Create unit tests for boundary matching, duplicate-keyword URL randomization, exclusion-zone protection, and cap enforcement

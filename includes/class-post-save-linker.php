@@ -265,6 +265,11 @@ final class Post_Save_Linker
         $raw_text_tag = '';
 
         while ($offset < $content_length) {
+            if ($inserted_links >= $max_links_per_post) {
+                $linked_content .= substr($content, $offset);
+                break;
+            }
+
             if ($raw_text_tag !== '') {
                 $raw_close_offset = stripos($content, '</' . $raw_text_tag, $offset);
 

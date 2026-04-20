@@ -30,6 +30,7 @@ $clicklink_test_autosave_ids = array();
 $clicklink_test_revision_ids = array();
 $clicklink_test_updates = array();
 $clicklink_test_rand_sequence = array();
+$clicklink_test_wp_rand_calls = 0;
 
 if (! function_exists('add_action')) {
     function add_action(string $hook, callable $callback, int $priority = 10, int $accepted_args = 1): void
@@ -152,7 +153,10 @@ if (! function_exists('wp_update_post')) {
 if (! function_exists('wp_rand')) {
     function wp_rand(int $min = 0, int $max = 0): int
     {
+        global $clicklink_test_wp_rand_calls;
         global $clicklink_test_rand_sequence;
+
+        $clicklink_test_wp_rand_calls++;
 
         if ($clicklink_test_rand_sequence === array()) {
             return $min;
@@ -217,6 +221,7 @@ $reset_environment = static function (): void {
     global $clicklink_test_revision_ids;
     global $clicklink_test_updates;
     global $clicklink_test_rand_sequence;
+    global $clicklink_test_wp_rand_calls;
     global $wpdb;
 
     $clicklink_test_options = array(
@@ -229,6 +234,7 @@ $reset_environment = static function (): void {
     $clicklink_test_revision_ids = array();
     $clicklink_test_updates = array();
     $clicklink_test_rand_sequence = array();
+    $clicklink_test_wp_rand_calls = 0;
 
     if (is_object($wpdb) && property_exists($wpdb, 'get_results_calls')) {
         $wpdb->get_results_calls = 0;
@@ -316,6 +322,10 @@ $assert(
 $assert(
     $random_a_count === 2 && $random_b_count === 0,
     'Expected out-of-range random selections to fall back safely to the first duplicate-keyword URL.'
+);
+$assert(
+    $clicklink_test_wp_rand_calls === 3,
+    'Expected duplicate-keyword URL selection to run random URL selection on each inserted keyword match.'
 );
 
 $reset_environment();
@@ -456,6 +466,55 @@ $assert(
 $assert(
     (int) (($clicklink_test_options['clicklink_stats']['total_links_inserted'] ?? 0)) === 3,
     'Expected cumulative stats to reflect the capped insert count from a qualifying save.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 2;
+$wpdb->mappings = array(
+    array('keyword' => 'apple', 'url' => 'https://example.com/apple-a'),
+    array('keyword' => 'apple', 'url' => 'https://example.com/apple-b'),
+    array('keyword' => 'banana', 'url' => 'https://example.com/banana'),
+);
+$clicklink_test_rand_sequence = array(1, 0, 1, 1);
+
+$deterministic_cap_content = '<p>banana apple banana apple</p>';
+$updated_deterministic_cap_content = $run_save($linker, 4505, $deterministic_cap_content, false);
+$deterministic_cap_link_count = preg_match_all('/<a href="https:\/\/example\.com\//', $updated_deterministic_cap_content, $deterministic_cap_matches);
+
+$assert(
+    $deterministic_cap_link_count === 2,
+    'Expected deterministic max-link stopping to stop exactly at the configured post-level cap.'
+);
+$assert(
+    str_contains(
+        $updated_deterministic_cap_content,
+        '<p><a href="https://example.com/banana">banana</a> <a href="https://example.com/apple-b">apple</a> banana apple</p>'
+    ),
+    'Expected deterministic cap ordering to link the earliest eligible matches and leave remaining occurrences untouched after cap is reached.'
+);
+$assert(
+    $clicklink_test_wp_rand_calls === 1,
+    'Expected capped linking flow to skip additional random URL selection once max links are already reached.'
+);
+
+$reset_environment();
+$linker = new \ClickLink\Post_Save_Linker();
+$clicklink_test_options['clicklink_options']['max_links_per_post'] = 0;
+$wpdb->mappings = array(
+    array('keyword' => 'apple', 'url' => 'https://example.com/apple'),
+);
+
+$no_op_cap_content = '<p>apple apple</p>';
+$updated_no_op_cap_content = $run_save($linker, 4606, $no_op_cap_content, false);
+
+$assert(
+    $updated_no_op_cap_content === $no_op_cap_content,
+    'Expected max_links_per_post = 0 to leave content unchanged as a safe no-op.'
+);
+$assert(
+    $clicklink_test_updates === array(),
+    'Expected max_links_per_post = 0 to skip post content updates entirely.'
 );
 
 if ($failures !== array()) {
