@@ -2,5 +2,6 @@
 set -eu
 
 php tests/test-compatibility.php
+php tests/test-admin-page.php
 php tests/test-installer.php
 php tests/test-lifecycle.php

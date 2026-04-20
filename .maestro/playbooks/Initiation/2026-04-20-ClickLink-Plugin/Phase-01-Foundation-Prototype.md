@@ -16,10 +16,11 @@ This phase creates a fully runnable ClickLink plugin baseline that installs clea
   - Add plugin options with sane defaults (including `max_links_per_post = 5`) so Phase 01 is executable without prompts
   - Completion note (2026-04-20, loop 00001): Added `Installer` migration/runtime upgrade flow with `dbDelta` schema creation for `clicklink_keyword_mappings` (non-unique keyword rows), indexes on keyword/created_at/updated_at, schema version tracking via `clicklink_schema_version`, and default `clicklink_options` initialization with `max_links_per_post = 5`, validated by new installer tests plus existing suite.
 
-- [ ] Build the admin mappings page for CRUD management:
+- [x] Build the admin mappings page for CRUD management:
   - Add an admin menu page under the dashboard for ClickLink settings
   - Implement a secure mappings table UI with add/edit/delete actions for `keyword + url` rows (duplicate keyword rows allowed)
   - Apply nonce validation, capability checks, URL sanitization, keyword normalization, and success/error admin notices
+  - Completion note (2026-04-20, loop 00001): Replaced the admin placeholder with a dashboard submenu CRUD interface for keyword/url mappings backed by `clicklink_keyword_mappings`, including capability + nonce enforcement, normalized lowercase keywords, URL sanitization/validation, redirect-based success/error notices, and new deterministic `test-admin-page.php` coverage wired into `tests/run-tests.sh`.
 
 - [ ] Create the post-save auto-linking prototype engine:
   - Hook into post save for blog posts only, skipping autosaves/revisions and unchanged content saves
