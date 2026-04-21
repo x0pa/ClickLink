@@ -17,10 +17,7 @@
 /languages/
 
 # Non-runtime documentation and metadata
-/README.md
 /CHANGELOG.md
-/LICENSE
-/readme.txt
 /*.zip
 
 # OS / editor noise

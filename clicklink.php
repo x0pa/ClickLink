@@ -7,8 +7,8 @@
  * Author URI: https://www.dadewilliams.com
  * Text Domain: clicklink
  * Domain Path: /languages
- * License: GPL-2.0-or-later
- * License URI: https://www.gnu.org/licenses/old-licenses/gpl-2.0.html
+ * License: MIT
+ * License URI: https://opensource.org/license/mit
  * Requires at least: 6.5
  * Requires PHP: 8.1
  * Network: false
