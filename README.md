@@ -16,7 +16,6 @@ ClickLink is a WordPress plugin that auto-links keyword mappings in blog posts a
 
 - WordPress `6.5+`
 - PHP `8.1+`
-- Single-site installs only (`multisite` is intentionally unsupported)
 
 ## Installation
 
