@@ -7,7 +7,6 @@ ClickLink is a WordPress plugin that auto-links keyword mappings in blog posts a
 - Keyword-to-URL mapping management in wp-admin.
 - Automatic link insertion on `post` save.
 - Context-aware linking that skips existing links, headings, and code/script/style blocks.
-- Configurable per-post max link cap (default `5`).
 - Manual backfill scanner for processing existing published posts in batches.
 - Dashboard widget metrics, including total links created and top matched keywords.
 - Uninstall cleanup for plugin table, options, scanner state, stats, and linker post meta.
