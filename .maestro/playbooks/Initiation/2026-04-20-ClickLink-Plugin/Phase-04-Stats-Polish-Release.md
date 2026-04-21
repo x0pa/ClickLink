@@ -45,10 +45,13 @@ This phase turns ClickLink into a polished, release-ready plugin by expanding ac
   - Completed 2026-04-20: Strengthened `tests/test-admin-page.php` with mixed bulk-delete coverage plus additional delete/reset capability and nonce enforcement assertions.
   - Completed 2026-04-20: Re-ran `sh tests/run-tests.sh` successfully after regression suite updates.
 
-- [ ] Run full quality verification and remediate issues:
+- [x] Run full quality verification and remediate issues:
   - Execute lint/static analysis/tests and resolve all failures
   - Run end-to-end smoke checks on a clean WordPress install with sample content volume
   - Validate that final behavior matches requirements: random URL choice per keyword, 5-link cap, paragraph-only linking, manual run-only backfill
+  - Completed 2026-04-20: Ran repository-wide PHP lint (`php -l` across all plugin/test files), full regression suite (`sh tests/run-tests.sh`), and explicit smoke reruns (`php tests/test-prototype-smoke.php`, `php tests/test-backfill-scanner.php`); all checks passed with no remediation required.
+  - Completed 2026-04-20: Verified high-volume sample coverage via `tests/test-backfill-scanner.php` performance fixtures (120 published posts, deterministic scanner completion/stat counters, bounded mapping query calls).
+  - Completed 2026-04-20: Re-validated release-critical linker behavior through passing assertions for duplicate-keyword random URL selection, 5-link max cap enforcement, paragraph-only insertion/exclusion zones, and admin-triggered manual backfill-only flows (no scheduled cron hooks present).
 
 - [ ] Package the plugin for distribution readiness:
   - Prepare the release artifact structure and verify activation/deactivation/uninstall flows are clean
