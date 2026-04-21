@@ -53,7 +53,10 @@ This phase turns ClickLink into a polished, release-ready plugin by expanding ac
   - Completed 2026-04-20: Verified high-volume sample coverage via `tests/test-backfill-scanner.php` performance fixtures (120 published posts, deterministic scanner completion/stat counters, bounded mapping query calls).
   - Completed 2026-04-20: Re-validated release-critical linker behavior through passing assertions for duplicate-keyword random URL selection, 5-link max cap enforcement, paragraph-only insertion/exclusion zones, and admin-triggered manual backfill-only flows (no scheduled cron hooks present).
 
-- [ ] Package the plugin for distribution readiness:
+- [x] Package the plugin for distribution readiness:
   - Prepare the release artifact structure and verify activation/deactivation/uninstall flows are clean
   - Confirm text domain/loading metadata, versioning, and changelog-ready code comments where needed
   - Produce a shippable plugin package that can be installed and validated in a fresh WordPress environment
+  - Completed 2026-04-20: Added release lifecycle hardening with `uninstall.php` + `ClickLink\Uninstaller`, explicit deactivation no-op rationale, and regression coverage in `tests/test-uninstaller.php`.
+  - Completed 2026-04-20: Added text-domain loading at runtime via `Plugin::load_textdomain()`, `Domain Path: /languages` metadata, and version/changelog synchronization notes.
+  - Completed 2026-04-20: Added `scripts/build-release-package.sh` and generated `.maestro/playbooks/Working/clicklink-0.1.0.zip`; verified archive contents include only shippable plugin runtime assets/docs.

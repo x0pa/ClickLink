@@ -28,7 +28,8 @@ final class Lifecycle
 
     public static function deactivate(): void
     {
-        // Kept intentionally empty for Phase 01 foundation.
+        // ClickLink currently does not register rewrite rules, cron events, or transients.
+        // Deactivation is intentionally a no-op; persistent data is removed only on uninstall.
     }
 
     private static function deactivate_self(): void

@@ -32,6 +32,8 @@ final class Plugin
 
     public function run(): void
     {
+        $this->load_textdomain();
+
         if (! Compatibility::is_supported_environment()) {
             if (function_exists('add_action')) {
                 add_action('admin_notices', array(Compatibility::class, 'render_unsupported_notice'));
@@ -55,5 +57,22 @@ final class Plugin
             $this->dashboard_widget = new Dashboard_Widget($this->linker_stats);
             $this->dashboard_widget->register();
         }
+    }
+
+    private function load_textdomain(): void
+    {
+        if (! function_exists('load_plugin_textdomain')) {
+            return;
+        }
+
+        $plugin_base = function_exists('plugin_basename')
+            ? plugin_basename(CLICKLINK_FILE)
+            : basename(CLICKLINK_FILE);
+        $plugin_directory = trim(dirname($plugin_base), '/\\');
+        $language_path = $plugin_directory === '' || $plugin_directory === '.'
+            ? 'languages'
+            : $plugin_directory . '/languages';
+
+        load_plugin_textdomain('clicklink', false, $language_path);
     }
 }

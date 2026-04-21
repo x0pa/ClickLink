@@ -5,6 +5,7 @@
  * Version: 0.1.0
  * Author: ClickLink
  * Text Domain: clicklink
+ * Domain Path: /languages
  * Requires at least: 6.5
  * Requires PHP: 8.1
  * Network: false
@@ -16,6 +17,7 @@ if (! defined('ABSPATH')) {
     exit;
 }
 
+// Keep this synchronized with the plugin header Version and release changelog entries.
 define('CLICKLINK_VERSION', '0.1.0');
 define('CLICKLINK_FILE', __FILE__);
 define('CLICKLINK_PATH', plugin_dir_path(CLICKLINK_FILE));

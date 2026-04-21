@@ -6,6 +6,7 @@ php tests/test-admin-page.php
 php tests/test-dashboard-widget.php
 php tests/test-installer.php
 php tests/test-lifecycle.php
+php tests/test-uninstaller.php
 php tests/test-linker-focused.php
 php tests/test-post-save-linker.php
 php tests/test-backfill-scanner.php

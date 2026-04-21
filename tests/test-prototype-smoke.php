@@ -198,6 +198,7 @@ $clicklink_test_updates = array();
 $clicklink_test_dbdelta_calls = array();
 $clicklink_test_options = array();
 $clicklink_test_post_meta = array();
+$clicklink_test_loaded_textdomains = array();
 $clicklink_test_posts = array(
     100 => array(
         'post_type' => 'post',
@@ -300,6 +301,21 @@ if (! function_exists('plugin_basename')) {
     function plugin_basename(string $file): string
     {
         return basename($file);
+    }
+}
+
+if (! function_exists('load_plugin_textdomain')) {
+    function load_plugin_textdomain(string $domain, bool $deprecated = false, string $path = ''): bool
+    {
+        global $clicklink_test_loaded_textdomains;
+
+        $clicklink_test_loaded_textdomains[] = array(
+            'domain' => $domain,
+            'deprecated' => $deprecated,
+            'path' => $path,
+        );
+
+        return true;
     }
 }
 
@@ -682,6 +698,12 @@ $assert(
 $assert(
     isset($clicklink_test_actions['wp_dashboard_setup']),
     'Expected Plugin::run() to register dashboard widget setup hook.'
+);
+$assert(
+    isset($clicklink_test_loaded_textdomains[0])
+        && ($clicklink_test_loaded_textdomains[0]['domain'] ?? '') === 'clicklink'
+        && ($clicklink_test_loaded_textdomains[0]['path'] ?? '') === 'languages',
+    'Expected Plugin::run() to load the clicklink text domain from the languages folder.'
 );
 
 $save_mapping_hooks = $clicklink_test_actions['admin_post_clicklink_save_mapping'] ?? array();
