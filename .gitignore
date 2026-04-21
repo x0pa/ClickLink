@@ -1,15 +1,31 @@
-# Build artifacts
-/dist/
-/*.zip
+# Keep repository tracking runtime-essential plugin files only.
+# Tracked runtime files:
+# - clicklink.php
+# - uninstall.php
+# - admin/
+# - includes/
 
-# Local orchestration artifacts
+# Local orchestration and planning artifacts
 /.maestro/
 
-# macOS / Windows
+# Development and release support files
+/docs/
+/tests/
+/scripts/
+/dist/
+/assets/
+/languages/
+
+# Non-runtime documentation and metadata
+/README.md
+/CHANGELOG.md
+/LICENSE
+/readme.txt
+/*.zip
+
+# OS / editor noise
 .DS_Store
 Thumbs.db
-
-# Editors
 .vscode/
 .idea/
 *.swp
