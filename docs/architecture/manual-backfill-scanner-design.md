@@ -1,17 +1,4 @@
----
-type: analysis
-title: Manual Backfill Scanner Reuse-First Design
-created: 2026-04-20
-tags:
-  - clicklink
-  - backfill-scanner
-  - phase-03
-  - architecture
-related:
-  - '[[Phase-03-Manual-Backfill-Scanner]]'
-  - '[[Post-Save-Linker]]'
-  - '[[Linker-Stats]]'
----
+# Manual Backfill Scanner Reuse-First Design
 
 ## Scope
 
@@ -33,11 +20,11 @@ Define the Phase 03 manual scanner architecture before implementation, with stri
 5. Scanner persists cursor and counters after each batch so progress survives page reloads/timeouts.
 6. When no more eligible posts remain, scanner transitions to `completed` and records final timestamps.
 
-## Explicit Non-Goals / Constraints
+## Explicit Non-Goals and Constraints
 
 - Multisite stays unsupported; rely on existing `Compatibility` gate and do not add network-aware scan paths.
 - No `wp_schedule_event`, cron registration, or background worker loop; execution is admin-triggered only.
-- Scanner does not process pages/custom post types/drafts/trash.
+- Scanner does not process pages, custom post types, drafts, or trash posts.
 
 ## Scanner State Model
 
@@ -78,7 +65,7 @@ Rationale:
 - Single object keeps read/write operations simple for admin UI status polling.
 - Cursor-by-post-ID makes resume deterministic and avoids offset drift when posts change during a run.
 
-## Implementation Guardrails For Next Task
+## Implementation Guardrails
 
 - Expose a reusable method on `Post_Save_Linker` for scanner invocation rather than reimplementing link transforms.
 - Keep per-run stats persistence separate from global totals, but call shared stats recorder for link insertions.

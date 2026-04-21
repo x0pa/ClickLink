@@ -1,0 +1,16 @@
+# Build artifacts
+/dist/
+/*.zip
+
+# Local orchestration artifacts
+/.maestro/
+
+# macOS / Windows
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo

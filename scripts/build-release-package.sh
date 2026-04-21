@@ -2,8 +2,8 @@
 set -eu
 
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-OUTPUT_DIR="${1:-${ROOT_DIR}/.maestro/playbooks/Working}"
-BUILD_DIR="${ROOT_DIR}/.maestro/playbooks/Working/.package-build"
+OUTPUT_DIR="${1:-${ROOT_DIR}/dist}"
+BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/clicklink-package.XXXXXX")"
 PACKAGE_NAME="clicklink"
 PACKAGE_DIR="${BUILD_DIR}/${PACKAGE_NAME}"
 
@@ -14,15 +14,27 @@ if [ -z "${VERSION}" ]; then
     exit 1
 fi
 
+if ! command -v zip >/dev/null 2>&1; then
+    echo "zip command not found. Install zip and try again." >&2
+    exit 1
+fi
+
 ZIP_PATH="${OUTPUT_DIR}/${PACKAGE_NAME}-${VERSION}.zip"
 
-rm -rf "${BUILD_DIR}"
+cleanup() {
+    rm -rf "${BUILD_DIR}"
+}
+
+trap cleanup EXIT INT TERM
+
 mkdir -p "${PACKAGE_DIR}" "${OUTPUT_DIR}"
 
 cp "${ROOT_DIR}/clicklink.php" "${PACKAGE_DIR}/"
 cp "${ROOT_DIR}/uninstall.php" "${PACKAGE_DIR}/"
 cp "${ROOT_DIR}/README.md" "${PACKAGE_DIR}/"
+cp "${ROOT_DIR}/readme.txt" "${PACKAGE_DIR}/"
 cp "${ROOT_DIR}/CHANGELOG.md" "${PACKAGE_DIR}/"
+cp "${ROOT_DIR}/LICENSE" "${PACKAGE_DIR}/"
 cp -R "${ROOT_DIR}/admin" "${PACKAGE_DIR}/admin"
 cp -R "${ROOT_DIR}/includes" "${PACKAGE_DIR}/includes"
 
@@ -41,7 +53,5 @@ rm -f "${ZIP_PATH}"
     cd "${BUILD_DIR}"
     zip -qr "${ZIP_PATH}" "${PACKAGE_NAME}"
 )
-
-rm -rf "${BUILD_DIR}"
 
 echo "Created release package: ${ZIP_PATH}"
